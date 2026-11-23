@@ -2,6 +2,11 @@ export type PracticeType = 'presentation' | 'interview' | 'pitch' | 'panel'
 export type VenueType = 'classroom' | 'lecture_hall' | 'auditorium' | 'interview_room' | 'panel_room'
 export type AudienceBehaviour = 'supportive' | 'attentive' | 'distracted' | 'challenging'
 export type InterruptionLevel = 'none' | 'low' | 'medium' | 'high'
+export type AppLanguage = 'en' | 'fr'
+export type UserRole = 'student' | 'lecturer' | 'job_seeker' | 'professional'
+export type CompanionScreen = 'welcome' | 'auth' | 'profile_setup' | 'home'
+export type AuthMode = 'signup' | 'login'
+export type DashboardTab = 'home' | 'history' | 'progress' | 'settings'
 
 export interface Topic {
   id: string
@@ -26,4 +31,41 @@ export interface SessionSetup {
   coachedMode: boolean
   goals: string[]
   topics: Topic[]
+}
+
+export interface UserProfile {
+  id: string
+  email: string
+  fullName: string
+  role: UserRole
+  field: string
+  practiceGoals: string[]
+  difficulties: string[]
+  appLanguage: AppLanguage
+  keepRecordings: boolean
+  autoDelete30d: boolean
+  captionsEnabled: boolean
+  isDemo?: boolean
+}
+
+export interface SessionSummary {
+  id: string
+  title: string
+  practiceType: PracticeType
+  venue: VenueType
+  durationSeconds: number
+  wpm: number
+  fillerCount: number
+  eyeContactPct: number
+  topicsCovered: number
+  topicsTotal: number
+  createdAt: string
+  coachedMode: boolean
+}
+
+export interface WeeklyStats {
+  sessionsThisWeek: number
+  totalMinutes: number
+  avgWpm: number
+  targetSessions: number
 }
