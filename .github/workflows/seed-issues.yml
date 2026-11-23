@@ -1,0 +1,158 @@
+name: Seed Stagera VR Issues
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Stagera VR labels and 12 requirements-mapped issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            const labels = [
+              { name: 'setup', color: '0E8A16', description: 'Project setup and infrastructure' },
+              { name: 'step-1', color: '1D76DB', description: 'Step 1: Phone Setup & Session Preparation' },
+              { name: 'step-2', color: '5319E7', description: 'Step 2: In-VR Practice Session' },
+              { name: 'step-3', color: '006B75', description: 'Step 3: Feedback, Replay & Progress' },
+              { name: 'milestone', color: 'D93F0B', description: 'Pitch or final submission milestone' },
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({ owner, repo, ...label });
+              } catch (err) {
+                if (err.status !== 422) throw err;
+              }
+            }
+
+            const issues = [
+              {
+                title: '[Setup] Init WebXR + Companion App stack (React Three Fiber, Three.js, TypeScript, Supabase)',
+                labels: ['setup'],
+                body: [
+                  '**Target:** Nov 27 | **Requirements:** `FR-01`, `NFR-06`, `NFR-10`',
+                  '- [ ] Set up Vite + React + TypeScript + React Three Fiber + `@react-three/xr`',
+                  '- [ ] Connect Supabase client and apply initial SQL schema with private RLS policies',
+                  '- [ ] Set base theme tokens meeting WCAG 2.1 AA contrast for phone views',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 1] Auth, User Profile & EN/FR Localization (S1.1-S1.4)',
+                labels: ['step-1'],
+                body: [
+                  '**Target:** Nov 27 | **Requirements:** `FR-01`, `FR-02`, `NFR-10` | **Screens:** S1.1–S1.4',
+                  '- [ ] Email/password + Google OAuth sign-up and login',
+                  '- [ ] Profile setup: role (Student, Lecturer, Job seeker, Professional), goals, difficulties, EN/FR toggle',
+                  '- [ ] Home dashboard with saved setups, last session summary, and weekly stats',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 1] Practice Types, Material Upload & AI Topic Extraction (S1.5-S1.7, S1.6b)',
+                labels: ['step-1'],
+                body: [
+                  '**Target:** Nov 27 | **Requirements:** `FR-03`, `FR-04`, `FR-05`, `NFR-09` | **Screens:** S1.5–S1.7, S1.6b',
+                  '- [ ] Select practice type: Presentation/Lecture, Interview (1-on-1/panel), Pitch, or Panel',
+                  '- [ ] Upload PPTX/PDF/DOCX/TXT (up to 25 MB / 50 slides) or enter job title, JD, project summary, optional CV',
+                  '- [ ] Extract topics/interview themes within 30s; support edit, reorder, add, delete, and mark as brief',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 1] Venue, Audience Behaviour, Interruptions, Goals & Saved Setups (S1.8-S1.9, S1.8b)',
+                labels: ['step-1'],
+                body: [
+                  '**Target:** Nov 27 | **Requirements:** `FR-06`, `FR-07`, `FR-08`, `FR-28`, `NFR-07` | **Screens:** S1.8–S1.9, S1.8b',
+                  '- [ ] Venue picker: Classroom (30), Lecture Hall (60), Auditorium (200), Interview Room (1), Panel Room (3)',
+                  '- [ ] Behaviour (Supportive, Attentive, Distracted, Challenging) + Interruption rate (None/Low/Medium/High) + follow-ups/Q&A toggles',
+                  '- [ ] Time limit (5–90 min), 1-min warning, up to 3 practice goals, coached mode toggle, save setup (<3 min first-time setup)',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 1-2] 4-Digit Phone-to-Headset Pairing & Saved Setups in VR (S1.10, S2.0)',
+                labels: ['step-1', 'step-2'],
+                body: [
+                  '**Target:** Nov 27 | **Requirements:** `FR-09`, `FR-31` | **Screens:** S1.10, S2.0',
+                  '- [ ] Generate 4-digit pairing code expiring after 5 min via Supabase Realtime',
+                  '- [ ] Show connection status and push active session setup to headset',
+                  '- [ ] List saved setups inside headset (S2.0) so users can start directly with the controller',
+                ].join('\n'),
+              },
+              {
+                title: '[Milestone] Pitch Session Demo Readiness — Nov 27, 2026',
+                labels: ['milestone'],
+                body: [
+                  '**Target Date:** Friday, Nov 27, 2026',
+                  '- [ ] Working end-to-end demo slice: Phone setup -> 4-digit pairing -> Lecture Hall or Interview Room VR scene -> 1 live AI question -> Quick Debrief + Phone Report preview',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 2] WebXR 3D Venues, Instanced Avatars & Slide Projector (S2.1, S2.2, S2.2b, S2.4)',
+                labels: ['step-2'],
+                body: [
+                  '**Target:** Dec 4 | **Requirements:** `FR-10`, `FR-13`, `NFR-01`, `NFR-05`, `NFR-10` | **Screens:** S2.1, S2.2, S2.2b, S2.4',
+                  '- [ ] Build 5 venues + slide projector & confidence screen',
+                  '- [ ] Animate instanced audience/interviewer behaviour ratios + discrete interruptions (raised hands, late arrivals, repeat requests)',
+                  '- [ ] Hit >=72 FPS on Meta Quest 3 (up to 200 avatars), no artificial camera movement (<20ms latency), >=32px VR text',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 2] In-VR Slide Controls, Private Panel, Pause Menu & Coached Hints (S2.2, S2.5, S2.5b)',
+                labels: ['step-2'],
+                body: [
+                  '**Target:** Dec 4 | **Requirements:** `FR-11`, `FR-12`, `FR-17`, `FR-29` | **Screens:** S2.2, S2.5, S2.5b',
+                  '- [ ] Next/previous slide via controller trigger or voice commands (`next slide`, `previous slide`)',
+                  '- [ ] Toggleable private panel (timer, slide/question number, live outline ticks) + 1-min warning',
+                  '- [ ] Pause menu (freezes audience & timer) + Coached Mode "Give me a hint" (Problem–Action–Result prompt)',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 2] Live Speech Transcription, AI Q&A (<2s) & Head-Gaze Calibration (S2.1, S2.3, S2.2b)',
+                labels: ['step-2'],
+                body: [
+                  '**Target:** Dec 4 | **Requirements:** `FR-14`, `FR-15`, `FR-16`, `NFR-02`, `NFR-04`, `NFR-10` | **Screens:** S2.1, S2.3, S2.2b',
+                  '- [ ] Pre-session mic test and 3-point head-gaze calibration (left, centre, right)',
+                  '- [ ] Live English transcription (>=90% word accuracy, >=85% filler precision)',
+                  '- [ ] AI audience/interviewer questions & follow-ups starting spoken reply in <2s (95% of replies) with default-on captions',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 2] Session Recording, 30s Auto-Save, Auto-Flagging & VR Quick Debrief (S2.6, S2.7)',
+                labels: ['step-2'],
+                body: [
+                  '**Target:** Dec 4 | **Requirements:** `FR-18`, `FR-32`, `NFR-08` | **Screens:** S2.6, S2.7',
+                  '- [ ] Record audio, transcript, gaze zones, and slide timings up to 90 min with auto-save every 30s',
+                  '- [ ] Auto-flag questions, skipped slides, pauses >5s, pace >160 wpm, and hints used',
+                  '- [ ] In-VR Quick Debrief (WPM, fillers, topics covered, time vs limit, 1 tip, 1 flagged moment, goal-first feedback, Retry / Repeat / Raise difficulty)',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 3] Session Report, Goal-First Feedback, Timeline & Moment Replay/Retry (S3.1-S3.4, S3.1b, S3.4b)',
+                labels: ['step-3'],
+                body: [
+                  '**Target:** Dec 4 | **Requirements:** `FR-19`–`FR-24`, `FR-30`, `NFR-03` | **Screens:** S3.1–S3.4, S3.1b, S3.4b',
+                  '- [ ] Generate report in <30s (<=20 min) / <90s (<=90 min): WPM, fillers by word, gaze zones, time, topics, >=3 linked tips',
+                  '- [ ] Goal-first interview feedback (`I` vs `we` ownership + Problem–Action–Result check)',
+                  '- [ ] Flagged moments timeline + Moment Replay (Presenter/Audience/2D POV) + Repeat moment / Retry question + Coached vs Independent comparison',
+                ].join('\n'),
+              },
+              {
+                title: '[Step 3 & Milestone] Progress Dashboard, History, Privacy Controls & Final Submission — Dec 4, 2026 (S3.5-S3.7)',
+                labels: ['step-3', 'milestone'],
+                body: [
+                  '**Target Date:** Friday, Dec 4, 2026 | **Requirements:** `FR-25`, `FR-26`, `FR-27`, `NFR-06` | **Screens:** S3.5–S3.7',
+                  '- [ ] Progress dashboard with metric trends, custom targets, and auto-suggested harder level after 2 target-hitting sessions',
+                  '- [ ] Session history (open, rename, delete) + Privacy settings (TLS 1.2+, AES-256, 30-day auto-delete, export, 24h permanent deletion)',
+                  '- [ ] Final testing, polish, and submission',
+                ].join('\n'),
+              },
+            ];
+
+            for (const issue of issues) {
+              await github.rest.issues.create({ owner, repo, ...issue });
+            }
