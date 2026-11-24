@@ -2,7 +2,8 @@ import { useMemo, useRef, useEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { XR, createXRStore } from '@react-three/xr'
 import * as THREE from 'three'
-import type { VenueType } from '../types/stagera'
+import { translations } from '../lib/i18n'
+import type { AppLanguage, SessionSetup, VenueType } from '../types/stagera'
 
 const xrStore = createXRStore()
 
@@ -42,29 +43,54 @@ function InstancedAudience({ count }: { count: number }) {
   )
 }
 
-export function VRStage({ venue }: { venue: VenueType }) {
-  const count = SEAT_COUNTS[venue]
+interface VRStageProps {
+  setup: SessionSetup
+  language?: AppLanguage
+  captionsEnabled?: boolean
+  onBackToPreFlight?: () => void
+}
+
+export function VRStage({
+  setup,
+  language = 'en',
+  captionsEnabled = true,
+  onBackToPreFlight,
+}: VRStageProps) {
+  const count = SEAT_COUNTS[setup.venue]
+  const homeT = translations[language].home
+  const preflightT = translations[language].preflight
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '70vh', borderRadius: 12, overflow: 'hidden' }}>
-      <button
-        onClick={() => xrStore.enterVR()}
-        style={{
-          position: 'absolute',
-          top: 16,
-          right: 16,
-          zIndex: 10,
-          padding: '10px 16px',
-          borderRadius: 8,
-          border: 'none',
-          background: '#2563eb',
-          color: '#fff',
-          fontWeight: 600,
-          cursor: 'pointer',
-        }}
-      >
-        Enter VR (Quest 3)
-      </button>
+      <div className="vr-stage-overlay-bar">
+        <div className="vr-stage-meta">
+          <strong>{setup.title}</strong>
+          <span>
+            {homeT.venues[setup.venue]} · {setup.timeLimitMinutes} {homeT.minUnit}
+            {captionsEnabled ? ' · CC' : ''}
+          </span>
+        </div>
+        <div className="vr-stage-actions">
+          {onBackToPreFlight && (
+            <button
+              id="vr-change-setup-btn"
+              type="button"
+              className="btn-small-ghost"
+              onClick={onBackToPreFlight}
+            >
+              {preflightT.changeSetupBtn}
+            </button>
+          )}
+          <button
+            id="vr-enter-xr-btn"
+            type="button"
+            className="btn-small"
+            onClick={() => xrStore.enterVR()}
+          >
+            Enter VR (Quest 3)
+          </button>
+        </div>
+      </div>
 
       <Canvas camera={{ position: [0, 1.65, 2], fov: 65 }}>
         <XR store={xrStore}>

@@ -275,6 +275,53 @@ export interface Translations {
       saving: string
     }
   }
+  pairing: {
+    back: string
+    kicker: string
+    heading: string
+    subtitle: string
+    codeLabel: string
+    expiresIn: string
+    codeExpired: string
+    generateNewCode: string
+    statusWaiting: string
+    statusConnected: string
+    statusExpired: string
+    checklistTitle: string
+    checklistSpace: string
+    checklistMic: string
+    checklistStand: string
+    launchLocalCta: string
+    backToHome: string
+  }
+  preflight: {
+    kicker: string
+    heading: string
+    subtitle: string
+    pairCardTitle: string
+    pairCardDesc: string
+    codeInputLabel: string
+    codeInputPlaceholder: string
+    connectBtn: string
+    connectingBtn: string
+    pairedBanner: string
+    errInvalidCode: string
+    errExpiredCode: string
+    errNotFoundCode: string
+    savedCardTitle: string
+    savedCardDesc: string
+    noSavedSetups: string
+    selectedSetupHeading: string
+    labelVenue: string
+    labelBehaviour: string
+    labelInterruptions: string
+    labelTimeLimit: string
+    labelTopics: string
+    captionsTitle: string
+    captionsDesc: string
+    startSessionCta: string
+    changeSetupBtn: string
+  }
 }
 
 export const translations: Record<AppLanguage, Translations> = {
@@ -642,6 +689,53 @@ export const translations: Record<AppLanguage, Translations> = {
         saving: 'Saving setup…',
       },
     },
+    pairing: {
+      back: 'Back',
+      kicker: 'Headset pairing',
+      heading: 'Connect headset & start',
+      subtitle: 'Enter this 4-digit code inside Stagera on your Meta Quest 3 to load your session.',
+      codeLabel: '4-digit pairing code',
+      expiresIn: 'Expires in {time}',
+      codeExpired: 'Code expired',
+      generateNewCode: 'Generate new code',
+      statusWaiting: 'Waiting for headset…',
+      statusConnected: 'Headset connected ✓ session sent',
+      statusExpired: 'Pairing code expired — generate a new code to continue.',
+      checklistTitle: 'Pre-VR checklist',
+      checklistSpace: 'Clear a quiet 2 × 2 m space around you',
+      checklistMic: 'Allow microphone access in your headset browser',
+      checklistStand: 'Stand or sit where you plan to present',
+      launchLocalCta: 'Launch VR on this device',
+      backToHome: 'Back to home',
+    },
+    preflight: {
+      kicker: 'In-headset lobby (S2.0)',
+      heading: 'Ready to rehearse in VR',
+      subtitle: 'Pair with your phone using a 4-digit code, or start directly from a saved setup.',
+      pairCardTitle: 'Pair with phone',
+      pairCardDesc: 'Enter the 4-digit code shown on your phone companion screen.',
+      codeInputLabel: '4-digit pairing code',
+      codeInputPlaceholder: '1234',
+      connectBtn: 'Connect',
+      connectingBtn: 'Connecting…',
+      pairedBanner: 'Connected to phone ✓ Session loaded',
+      errInvalidCode: 'Enter a valid 4-digit pairing code.',
+      errExpiredCode: 'That pairing code has expired. Generate a new code on your phone.',
+      errNotFoundCode: 'No active session found for that code. Check the digits and try again.',
+      savedCardTitle: 'Saved setups (no phone needed)',
+      savedCardDesc: 'Pick any saved rehearsal setup directly with your headset controller.',
+      noSavedSetups: 'No saved setups yet. Create one in Step 1 or pair with your phone.',
+      selectedSetupHeading: 'Selected session',
+      labelVenue: 'Venue',
+      labelBehaviour: 'Audience',
+      labelInterruptions: 'Interruptions',
+      labelTimeLimit: 'Time limit',
+      labelTopics: 'Topics',
+      captionsTitle: 'Live captions',
+      captionsDesc: 'ON by default for all audience and interviewer speech.',
+      startSessionCta: 'Start session',
+      changeSetupBtn: 'Change setup',
+    },
   },
   fr: {
     app: {
@@ -1006,6 +1100,53 @@ export const translations: Record<AppLanguage, Translations> = {
         saveForLater: 'Enregistrer pour plus tard',
         saving: 'Enregistrement…',
       },
+    },
+    pairing: {
+      back: 'Retour',
+      kicker: 'Appairage du casque',
+      heading: 'Connecter le casque et démarrer',
+      subtitle: 'Saisissez ce code à 4 chiffres dans Stagera sur votre Meta Quest 3 pour charger votre session.',
+      codeLabel: 'Code d’appairage à 4 chiffres',
+      expiresIn: 'Expire dans {time}',
+      codeExpired: 'Code expiré',
+      generateNewCode: 'Générer un nouveau code',
+      statusWaiting: 'En attente du casque…',
+      statusConnected: 'Casque connecté ✓ session envoyée',
+      statusExpired: 'Code d’appairage expiré — générez un nouveau code pour continuer.',
+      checklistTitle: 'Vérifications avant la VR',
+      checklistSpace: 'Dégagez un espace calme de 2 × 2 m autour de vous',
+      checklistMic: 'Autorisez l’accès au microphone dans le navigateur du casque',
+      checklistStand: 'Placez-vous à l’endroit où vous allez présenter',
+      launchLocalCta: 'Lancer la VR sur cet appareil',
+      backToHome: 'Retour à l’accueil',
+    },
+    preflight: {
+      kicker: 'Accueil casque VR (S2.0)',
+      heading: 'Prêt à répéter en VR',
+      subtitle: 'Associez votre téléphone avec un code à 4 chiffres ou démarrez directement une configuration enregistrée.',
+      pairCardTitle: 'Associer le téléphone',
+      pairCardDesc: 'Saisissez le code à 4 chiffres affiché sur l’application compagnon.',
+      codeInputLabel: 'Code d’appairage à 4 chiffres',
+      codeInputPlaceholder: '1234',
+      connectBtn: 'Connecter',
+      connectingBtn: 'Connexion…',
+      pairedBanner: 'Connecté au téléphone ✓ Session chargée',
+      errInvalidCode: 'Saisissez un code valide à 4 chiffres.',
+      errExpiredCode: 'Ce code a expiré. Générez un nouveau code sur votre téléphone.',
+      errNotFoundCode: 'Aucune session active trouvée pour ce code. Vérifiez les chiffres et réessayez.',
+      savedCardTitle: 'Configurations enregistrées (sans téléphone)',
+      savedCardDesc: 'Choisissez directement une configuration enregistrée avec votre contrôleur.',
+      noSavedSetups: 'Aucune configuration enregistrée. Créez-en une à l’étape 1 ou associez votre téléphone.',
+      selectedSetupHeading: 'Session sélectionnée',
+      labelVenue: 'Salle',
+      labelBehaviour: 'Audience',
+      labelInterruptions: 'Interruptions',
+      labelTimeLimit: 'Limite de temps',
+      labelTopics: 'Sujets',
+      captionsTitle: 'Sous-titres en direct',
+      captionsDesc: 'Activés par défaut pour toutes les interventions du public et du recruteur.',
+      startSessionCta: 'Démarrer la session',
+      changeSetupBtn: 'Changer de configuration',
     },
   },
 }

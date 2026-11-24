@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { CompanionFlow } from './companion/CompanionFlow'
 import { getStoredLanguage, setStoredLanguage } from './lib/auth'
 import { translations } from './lib/i18n'
-import type { AppLanguage, VenueType } from './types/stagera'
+import type { AppLanguage, SessionSetup } from './types/stagera'
+import { VRPreFlight } from './vr/VRPreFlight'
 import { VRStage } from './vr/VRStage'
 
 export function App() {
   const [step, setStep] = useState<'setup' | 'vr' | 'report'>('setup')
-  const [venue, setVenue] = useState<VenueType>('lecture_hall')
+  const [activeSetup, setActiveSetup] = useState<SessionSetup | null>(null)
+  const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [language, setLanguage] = useState<AppLanguage>(() => getStoredLanguage())
 
   useEffect(() => {
@@ -53,8 +55,8 @@ export function App() {
           <CompanionFlow
             language={language}
             onLanguageChange={handleLanguageChange}
-            onLaunchVR={(selectedVenue) => {
-              setVenue(selectedVenue)
+            onLaunchVR={(setup) => {
+              setActiveSetup(setup)
               setStep('vr')
             }}
             onOpenReport={() => setStep('report')}
@@ -63,7 +65,21 @@ export function App() {
 
         {step === 'vr' && (
           <div className="stage-card">
-            <VRStage venue={venue} />
+            {activeSetup ? (
+              <VRStage
+                setup={activeSetup}
+                language={language}
+                captionsEnabled={captionsEnabled}
+                onBackToPreFlight={() => setActiveSetup(null)}
+              />
+            ) : (
+              <VRPreFlight
+                language={language}
+                captionsEnabled={captionsEnabled}
+                onToggleCaptions={() => setCaptionsEnabled((prev) => !prev)}
+                onStartSession={(setup) => setActiveSetup(setup)}
+              />
+            )}
           </div>
         )}
 
