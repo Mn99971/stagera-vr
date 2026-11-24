@@ -379,6 +379,40 @@ export interface Translations {
       gazeZoneLeft: string
       gazeZoneCentre: string
       gazeZoneRight: string
+      simulateSpeechBtn: string
+      triggerQuestionBtn: string
+      autoSavedBadge: string
+      wpmLiveLabel: string
+      fillersLiveLabel: string
+    }
+    qa: {
+      answeringKicker: string
+      answerTimerLabel: string
+      aimUnder45: string
+      askFollowUpBtn: string
+      returnToSlideBtn: string
+      doneAnsweringBtn: string
+    }
+    debrief: {
+      kicker: string
+      heading: string
+      subtitle: string
+      metricWpm: string
+      metricFillers: string
+      metricTopics: string
+      metricTime: string
+      targetWpmNote: string
+      eyeContactHeading: string
+      goalFeedbackHeading: string
+      goalMetBadge: string
+      goalFocusBadge: string
+      topTipHeading: string
+      flaggedMomentHeading: string
+      noFlaggedMoments: string
+      tryAgainNow: string
+      repeatMoment: string
+      raiseDifficulty: string
+      fullReportPhone: string
     }
     pause: {
       heading: string
@@ -871,6 +905,40 @@ export const translations: Record<AppLanguage, Translations> = {
         gazeZoneLeft: 'Left',
         gazeZoneCentre: 'Centre',
         gazeZoneRight: 'Right',
+        simulateSpeechBtn: 'Simulate Speech',
+        triggerQuestionBtn: 'Trigger Question',
+        autoSavedBadge: 'Auto-saved',
+        wpmLiveLabel: 'WPM',
+        fillersLiveLabel: 'Fillers',
+      },
+      qa: {
+        answeringKicker: 'Live Q&A (S2.3)',
+        answerTimerLabel: 'Answer timer',
+        aimUnder45: 'Aim < 0:45',
+        askFollowUpBtn: 'Ask follow-up',
+        returnToSlideBtn: 'Return to → Slide {num}',
+        doneAnsweringBtn: 'Done answering',
+      },
+      debrief: {
+        kicker: 'Session Complete · Quick Debrief (S2.6 / S2.7)',
+        heading: 'Nice rehearsal!',
+        subtitle: 'Review your headline metrics right here in VR, or open the full replay on your phone.',
+        metricWpm: 'Speaking pace',
+        metricFillers: 'Filler words',
+        metricTopics: 'Points covered',
+        metricTime: 'Time vs limit',
+        targetWpmNote: 'Target: 120–150 WPM',
+        eyeContactHeading: 'Head-gaze zones',
+        goalFeedbackHeading: 'Goal-first feedback',
+        goalMetBadge: 'On track',
+        goalFocusBadge: 'Focus next',
+        topTipHeading: 'Top recommendation',
+        flaggedMomentHeading: 'Flagged moment to review',
+        noFlaggedMoments: 'Clean run — no major delivery flags detected.',
+        tryAgainNow: 'Try again now',
+        repeatMoment: 'Repeat this moment',
+        raiseDifficulty: 'Raise difficulty',
+        fullReportPhone: 'Full report on phone',
       },
       pause: {
         heading: 'Session paused',
@@ -1361,6 +1429,40 @@ export const translations: Record<AppLanguage, Translations> = {
         gazeZoneLeft: 'Gauche',
         gazeZoneCentre: 'Centre',
         gazeZoneRight: 'Droite',
+        simulateSpeechBtn: 'Simuler la parole',
+        triggerQuestionBtn: 'Déclencher question',
+        autoSavedBadge: 'Sauvegarde auto',
+        wpmLiveLabel: 'm/min',
+        fillersLiveLabel: 'Hésitations',
+      },
+      qa: {
+        answeringKicker: 'Questions en direct (S2.3)',
+        answerTimerLabel: 'Chrono réponse',
+        aimUnder45: 'Objectif < 0:45',
+        askFollowUpBtn: 'Poser une relance',
+        returnToSlideBtn: 'Retour → Diapo {num}',
+        doneAnsweringBtn: 'Réponse terminée',
+      },
+      debrief: {
+        kicker: 'Session terminée · Bilan rapide (S2.6 / S2.7)',
+        heading: 'Belle répétition !',
+        subtitle: 'Consultez vos indicateurs clés directement en VR ou ouvrez le rapport complet sur téléphone.',
+        metricWpm: 'Débit vocal',
+        metricFillers: 'Tics de langage',
+        metricTopics: 'Sujets couverts',
+        metricTime: 'Temps vs limite',
+        targetWpmNote: 'Cible : 120–150 m/min',
+        eyeContactHeading: 'Zones de regard',
+        goalFeedbackHeading: 'Retour sur vos objectifs',
+        goalMetBadge: 'Atteint',
+        goalFocusBadge: 'À travailler',
+        topTipHeading: 'Conseil prioritaire',
+        flaggedMomentHeading: 'Moment marqué à revoir',
+        noFlaggedMoments: 'Session fluide — aucun point d’alerte majeur.',
+        tryAgainNow: 'Réessayer maintenant',
+        repeatMoment: 'Répéter ce moment',
+        raiseDifficulty: 'Augmenter la difficulté',
+        fullReportPhone: 'Rapport complet sur téléphone',
       },
       pause: {
         heading: 'Session en pause',
