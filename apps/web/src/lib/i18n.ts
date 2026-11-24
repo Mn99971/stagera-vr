@@ -434,6 +434,126 @@ export interface Translations {
       parResultTip: string
     }
   }
+  step3: {
+    backToReport: string
+    report: {
+      kicker: string
+      goalsHeading: string
+      ownershipLabel: string
+      parCheckLabel: string
+      parProblem: string
+      parAction: string
+      parResult: string
+      wpmTarget: string
+      fillersByWord: string
+      noFillersDetected: string
+      missedTopicsNote: string
+      allTopicsCovered: string
+      eyeContactTitle: string
+      recommendationsTitle: string
+      viewLinkedMoment: string
+      seeFlaggedMoments: string
+      compareAttempts: string
+      tryAgainNow: string
+      raiseDifficulty: string
+      coachedBadge: string
+      independentBadge: string
+    }
+    timeline: {
+      kicker: string
+      heading: string
+      subtitle: string
+      empty: string
+      openReplay: string
+      recoveredBadge: string
+      types: {
+        question: string
+        skipped_slide: string
+        long_pause: string
+        pace_spike: string
+        hint_used: string
+        we_ownership: string
+      }
+    }
+    replay: {
+      kicker: string
+      heading: string
+      povLabel: string
+      povAudience: string
+      povPresenter: string
+      povPhone2d: string
+      playBtn: string
+      pauseBtn: string
+      transcriptHeading: string
+      aiTipHeading: string
+      repeatInVrBtn: string
+      retryQuestionBtn: string
+      recoveryRecorded: string
+      povAudienceDesc: string
+      povPresenterDesc: string
+      povPhone2dDesc: string
+    }
+    compare: {
+      kicker: string
+      heading: string
+      subtitle: string
+      currentLabel: string
+      previousLabel: string
+      metricCol: string
+      deltaCol: string
+      noPriorAttempts: string
+      coachedAssisted: string
+      independentAttempt: string
+      rowWpm: string
+      rowFillers: string
+      rowTopics: string
+      rowEyeContact: string
+      rowTime: string
+    }
+    progress: {
+      filterAllTypes: string
+      range7d: string
+      range30d: string
+      rangeAll: string
+      chartWpm: string
+      chartFillers: string
+      chartTopics: string
+      targetsTitle: string
+      targetWpmMin: string
+      targetWpmMax: string
+      targetMaxFillers: string
+      targetWeekly: string
+      saveTargetsBtn: string
+      targetsSaved: string
+      nudgeTitle: string
+      nudgeDesc: string
+      nudgeCta: string
+      noMatchingSessions: string
+    }
+    history: {
+      searchPlaceholder: string
+      renameBtn: string
+      saveNameBtn: string
+      cancelBtn: string
+      deleteBtn: string
+      confirmDeleteBtn: string
+      emptyHistory: string
+    }
+    privacy: {
+      securityNote: string
+      storageTitle: string
+      storageSessions: string
+      storageSetups: string
+      storageSize: string
+      exportDataBtn: string
+      exportDone: string
+      deleteAllBtn: string
+      deleteConfirmTitle: string
+      deleteConfirmDesc: string
+      deleteConfirmAction: string
+      deleteDoneNotice: string
+    }
+  }
 }
 
 export const translations: Record<AppLanguage, Translations> = {
@@ -960,6 +1080,126 @@ export const translations: Record<AppLanguage, Translations> = {
         parResultTip: 'Close with a measurable outcome, metric, or key lesson learned.',
       },
     },
+    step3: {
+      backToReport: 'Back to report',
+      report: {
+        kicker: 'Session Report (S3.1)',
+        goalsHeading: 'Your goals (S3.1b)',
+        ownershipLabel: 'Personal ownership (“I” vs “we”)',
+        parCheckLabel: 'PAR structure check',
+        parProblem: 'Problem',
+        parAction: 'Action',
+        parResult: 'Result',
+        wpmTarget: 'Target: 130–150 WPM',
+        fillersByWord: 'Filler breakdown by word',
+        noFillersDetected: 'No filler words detected.',
+        missedTopicsNote: '{missed} topic(s) not reached in this run.',
+        allTopicsCovered: 'All planned topics covered ✓',
+        eyeContactTitle: 'Eye-contact zones',
+        recommendationsTitle: 'Actionable recommendations',
+        viewLinkedMoment: 'Replay linked moment →',
+        seeFlaggedMoments: 'See flagged moments',
+        compareAttempts: 'Compare attempts',
+        tryAgainNow: 'Try again now',
+        raiseDifficulty: 'Raise difficulty',
+        coachedBadge: 'Coached (hint-assisted)',
+        independentBadge: 'Independent',
+      },
+      timeline: {
+        kicker: 'Flagged Moments (S3.2)',
+        heading: 'Flagged moments timeline',
+        subtitle: 'Tap any moment to inspect the replay, transcript highlights, and AI coaching tip.',
+        empty: 'No flagged moments were recorded in this session.',
+        openReplay: 'Replay moment',
+        recoveredBadge: 'Recovered ✓',
+        types: {
+          question: 'Q&A Question',
+          skipped_slide: 'Skipped Slide',
+          long_pause: 'Long Pause (>5s)',
+          pace_spike: 'Pace Spike (>160 WPM)',
+          hint_used: 'PAR Hint Used',
+          we_ownership: '“We” Ownership',
+        },
+      },
+      replay: {
+        kicker: 'Moment Replay (S3.3)',
+        heading: 'Replay & practice moment',
+        povLabel: 'Point of view',
+        povAudience: 'Audience view',
+        povPresenter: 'Presenter view',
+        povPhone2d: 'Phone 2D',
+        playBtn: 'Play clip',
+        pauseBtn: 'Pause',
+        transcriptHeading: 'Highlighted transcript',
+        aiTipHeading: 'AI coaching tip',
+        repeatInVrBtn: 'Repeat this moment in VR',
+        retryQuestionBtn: 'Retry this question in VR',
+        recoveryRecorded: 'Recovery attempt ready — launching VR at this moment.',
+        povAudienceDesc: 'See how your posture, gaze, and pacing appeared from the front row.',
+        povPresenterDesc: 'Revisit the stage from behind the lectern with your confidence screen.',
+        povPhone2dDesc: 'Compact 2D slide + synchronized audio waveform for quick review.',
+      },
+      compare: {
+        kicker: 'Attempt Comparison (S3.4 / S3.4b)',
+        heading: 'Compare attempts',
+        subtitle: 'Track how your delivery improved across runs of the same setup, with Coached vs Independent attempts clearly separated.',
+        currentLabel: 'Current attempt',
+        previousLabel: 'Previous attempt',
+        metricCol: 'Metric',
+        deltaCol: 'Change',
+        noPriorAttempts: 'Complete a second run of this setup to compare side-by-side deltas.',
+        coachedAssisted: 'Coached (hint-assisted)',
+        independentAttempt: 'Independent',
+        rowWpm: 'Speaking pace (WPM)',
+        rowFillers: 'Filler words',
+        rowTopics: 'Topics covered',
+        rowEyeContact: 'Side eye contact (L+R)',
+        rowTime: 'Duration',
+      },
+      progress: {
+        filterAllTypes: 'All types',
+        range7d: '7 days',
+        range30d: '30 days',
+        rangeAll: 'All time',
+        chartWpm: 'Speaking pace (WPM)',
+        chartFillers: 'Filler words per session',
+        chartTopics: 'Topics covered (%)',
+        targetsTitle: 'Personal targets',
+        targetWpmMin: 'Min WPM',
+        targetWpmMax: 'Max WPM',
+        targetMaxFillers: 'Max fillers',
+        targetWeekly: 'Weekly sessions',
+        saveTargetsBtn: 'Save targets',
+        targetsSaved: 'Targets saved ✓',
+        nudgeTitle: 'Ready for the next level?',
+        nudgeDesc: 'You hit your targets in 2 consecutive sessions! Step up audience behaviour and interruption difficulty.',
+        nudgeCta: 'Raise difficulty',
+        noMatchingSessions: 'No sessions match this filter yet.',
+      },
+      history: {
+        searchPlaceholder: 'Search sessions by title…',
+        renameBtn: 'Rename',
+        saveNameBtn: 'Save',
+        cancelBtn: 'Cancel',
+        deleteBtn: 'Delete',
+        confirmDeleteBtn: 'Confirm delete',
+        emptyHistory: 'No sessions found. Start a new VR rehearsal from Home.',
+      },
+      privacy: {
+        securityNote: 'Private by default · TLS 1.2+ in transit · AES-256 at rest · Row-Level Security enforced.',
+        storageTitle: 'Your private storage',
+        storageSessions: 'Recorded sessions',
+        storageSetups: 'Saved setups',
+        storageSize: 'Estimated storage',
+        exportDataBtn: 'Export my data (JSON)',
+        exportDone: 'Data export downloaded ✓',
+        deleteAllBtn: 'Delete all recordings & files',
+        deleteConfirmTitle: 'Permanently delete all recordings?',
+        deleteConfirmDesc: 'This removes all session transcripts, flagged moments, and recordings. Permanent hard deletion completes within 24 hours.',
+        deleteConfirmAction: 'Yes, delete everything',
+        deleteDoneNotice: 'All recordings & session data cleared (24h hard-delete purge queued).',
+      },
+    },
   },
   fr: {
     app: {
@@ -1482,6 +1722,126 @@ export const translations: Record<AppLanguage, Translations> = {
         parProblemTip: 'Présentez l’enjeu ou l’objectif de « {topic} » en 1 à 2 phrases.',
         parActionTip: 'Décrivez les actions concrètes que VOUS avez menées et votre raisonnement.',
         parResultTip: 'Concluez avec un résultat mesurable, un chiffre ou un enseignement clé.',
+      },
+    },
+    step3: {
+      backToReport: 'Retour au rapport',
+      report: {
+        kicker: 'Rapport de session (S3.1)',
+        goalsHeading: 'Vos objectifs (S3.1b)',
+        ownershipLabel: 'Contribution personnelle (« je » vs « nous »)',
+        parCheckLabel: 'Vérification de la structure PAR',
+        parProblem: 'Problème',
+        parAction: 'Action',
+        parResult: 'Résultat',
+        wpmTarget: 'Cible : 130–150 m/min',
+        fillersByWord: 'Détail des tics de langage',
+        noFillersDetected: 'Aucun tic de langage détecté.',
+        missedTopicsNote: '{missed} sujet(s) non abordé(s) dans cette session.',
+        allTopicsCovered: 'Tous les sujets prévus ont été couverts ✓',
+        eyeContactTitle: 'Zones de contact visuel',
+        recommendationsTitle: 'Recommandations concrètes',
+        viewLinkedMoment: 'Rejouer le moment lié →',
+        seeFlaggedMoments: 'Voir les moments marqués',
+        compareAttempts: 'Comparer les essais',
+        tryAgainNow: 'Réessayer maintenant',
+        raiseDifficulty: 'Augmenter la difficulté',
+        coachedBadge: 'Coaché (avec indices)',
+        independentBadge: 'Autonome',
+      },
+      timeline: {
+        kicker: 'Moments marqués (S3.2)',
+        heading: 'Chronologie des moments marqués',
+        subtitle: 'Touchez un moment pour ouvrir le replay, la transcription surlignée et le conseil IA.',
+        empty: 'Aucun moment marqué n’a été enregistré pour cette session.',
+        openReplay: 'Rejouer ce moment',
+        recoveredBadge: 'Corrigé ✓',
+        types: {
+          question: 'Question Q&R',
+          skipped_slide: 'Diapo sautée',
+          long_pause: 'Pause longue (>5s)',
+          pace_spike: 'Pic de débit (>160 m/min)',
+          hint_used: 'Indice PAR utilisé',
+          we_ownership: 'Emploi de « nous »',
+        },
+      },
+      replay: {
+        kicker: 'Replay du moment (S3.3)',
+        heading: 'Rejouer et retravailler ce moment',
+        povLabel: 'Point de vue',
+        povAudience: 'Vue public',
+        povPresenter: 'Vue présentateur',
+        povPhone2d: 'Téléphone 2D',
+        playBtn: 'Lire l’extrait',
+        pauseBtn: 'Pause',
+        transcriptHeading: 'Transcription surlignée',
+        aiTipHeading: 'Conseil du coach IA',
+        repeatInVrBtn: 'Répéter ce moment en VR',
+        retryQuestionBtn: 'Retenter cette question en VR',
+        recoveryRecorded: 'Essai de reprise prêt — lancement VR sur ce moment.',
+        povAudienceDesc: 'Observez votre posture, votre regard et votre débit depuis le premier rang.',
+        povPresenterDesc: 'Revivez la scène depuis le pupitre avec votre écran de confiance.',
+        povPhone2dDesc: 'Diapositive 2D compacte et piste audio synchronisée pour une révision rapide.',
+      },
+      compare: {
+        kicker: 'Comparaison d’essais (S3.4 / S3.4b)',
+        heading: 'Comparer les essais',
+        subtitle: 'Mesurez vos progrès sur une même configuration, en distinguant les essais Coachés et Autonomes.',
+        currentLabel: 'Essai actuel',
+        previousLabel: 'Essai précédent',
+        metricCol: 'Indicateur',
+        deltaCol: 'Évolution',
+        noPriorAttempts: 'Effectuez un deuxième essai sur cette configuration pour voir les écarts.',
+        coachedAssisted: 'Coaché (avec indices)',
+        independentAttempt: 'Autonome',
+        rowWpm: 'Débit vocal (m/min)',
+        rowFillers: 'Tics de langage',
+        rowTopics: 'Sujets couverts',
+        rowEyeContact: 'Regard latéral (G+D)',
+        rowTime: 'Durée',
+      },
+      progress: {
+        filterAllTypes: 'Tous les types',
+        range7d: '7 jours',
+        range30d: '30 jours',
+        rangeAll: 'Tout',
+        chartWpm: 'Débit vocal (m/min)',
+        chartFillers: 'Tics de langage par session',
+        chartTopics: 'Sujets couverts (%)',
+        targetsTitle: 'Objectifs personnels',
+        targetWpmMin: 'Min m/min',
+        targetWpmMax: 'Max m/min',
+        targetMaxFillers: 'Max tics',
+        targetWeekly: 'Sessions / sem.',
+        saveTargetsBtn: 'Enregistrer les cibles',
+        targetsSaved: 'Cibles enregistrées ✓',
+        nudgeTitle: 'Prêt pour le niveau supérieur ?',
+        nudgeDesc: 'Vous avez atteint vos objectifs sur 2 sessions consécutives ! Augmentez la difficulté du public.',
+        nudgeCta: 'Augmenter la difficulté',
+        noMatchingSessions: 'Aucune session ne correspond encore à ce filtre.',
+      },
+      history: {
+        searchPlaceholder: 'Rechercher une session par titre…',
+        renameBtn: 'Renommer',
+        saveNameBtn: 'Enregistrer',
+        cancelBtn: 'Annuler',
+        deleteBtn: 'Supprimer',
+        confirmDeleteBtn: 'Confirmer',
+        emptyHistory: 'Aucune session trouvée. Lancez une répétition VR depuis l’accueil.',
+      },
+      privacy: {
+        securityNote: 'Privé par défaut · TLS 1.2+ en transit · AES-256 au repos · Row-Level Security activée.',
+        storageTitle: 'Votre stockage privé',
+        storageSessions: 'Sessions enregistrées',
+        storageSetups: 'Configurations sauvegardées',
+        storageSize: 'Espace estimé',
+        exportDataBtn: 'Exporter mes données (JSON)',
+        exportDone: 'Export téléchargé ✓',
+        deleteAllBtn: 'Supprimer tous les enregistrements',
+        deleteConfirmTitle: 'Supprimer définitivement tous les enregistrements ?',
+        deleteConfirmDesc: 'Supprime toutes les transcriptions, moments marqués et enregistrements. Suppression définitive sous 24 heures.',
+        deleteConfirmAction: 'Oui, tout supprimer',
+        deleteDoneNotice: 'Tous les enregistrements et sessions ont été effacés (purge définitive sous 24h).',
       },
     },
   },
