@@ -3,28 +3,34 @@ import { extractTopics, getDefaultVenueForPracticeType } from '../ai/topicExtrac
 import { translations } from '../lib/i18n'
 import type {
   AppLanguage,
+  AudienceBehaviour,
+  InterruptionLevel,
   InterviewDetails,
   PracticeType,
   SessionSetup,
   Topic,
   UploadedMaterialFile,
   UserProfile,
+  VenueType,
 } from '../types/stagera'
 import { ConfirmTopicsScreen } from './ConfirmTopicsScreen'
+import { GoalsInterviewerScreen } from './GoalsInterviewerScreen'
 import { InterviewDetailsScreen } from './InterviewDetailsScreen'
 import { LanguageToggle } from './LanguageToggle'
 import { MaterialUploadScreen } from './MaterialUploadScreen'
 import { PracticeTypeScreen } from './PracticeTypeScreen'
+import { SessionReviewScreen, type EditableWizardStep } from './SessionReviewScreen'
+import { VenueAudienceScreen } from './VenueAudienceScreen'
 
 interface SessionWizardProps {
   language: AppLanguage
   profile: UserProfile
   onLanguageChange: (lang: AppLanguage) => void
   onCancel: () => void
-  onCompleteSetup: (setup: SessionSetup, launchImmediately: boolean) => void
+  onCompleteSetup: (setup: SessionSetup, launchImmediately: boolean) => Promise<void>
 }
 
-type WizardStep = 1 | 2 | 3
+type WizardStep = 1 | 2 | 3 | 4 | 5
 
 const TOTAL_WIZARD_STEPS = 5
 
@@ -70,17 +76,80 @@ export function SessionWizard({
     cvFile: null,
   })
   const [topics, setTopics] = useState<Topic[]>([])
+  const [includedTopicIds, setIncludedTopicIds] = useState<string[]>([])
   const [sessionTitle, setSessionTitle] = useState('')
   const [isExtracting, setIsExtracting] = useState(false)
+
+  // Step 4 state (S1.8 / S1.8b)
+  const [venue, setVenue] = useState<VenueType>('lecture_hall')
+  const [audienceBehaviour, setAudienceBehaviour] = useState<AudienceBehaviour>('supportive')
+  const [interruptionLevel, setInterruptionLevel] = useState<InterruptionLevel>('low')
+  const [followUps, setFollowUps] = useState(true)
+  const [questionsAtEnd, setQuestionsAtEnd] = useState(true)
+  const [unexpectedQuestions, setUnexpectedQuestions] = useState(false)
+  const [goals, setGoals] = useState<string[]>(['explain_contribution', 'handle_followups'])
+  const [coachedMode, setCoachedMode] = useState(false)
+
+  // Step 5 state (S1.9)
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState(15)
+  const [oneMinWarning, setOneMinWarning] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const handleSelectPracticeType = (nextType: PracticeType) => {
+    if (nextType !== practiceType) {
+      setSessionTitle('')
+      setVenue(getDefaultVenueForPracticeType(nextType))
+      if (nextType === 'interview') {
+        setAudienceBehaviour('attentive')
+        setInterruptionLevel('medium')
+        setFollowUps(true)
+        setQuestionsAtEnd(false)
+        setUnexpectedQuestions(false)
+        setTimeLimitMinutes(15)
+      } else if (nextType === 'pitch') {
+        setAudienceBehaviour('challenging')
+        setInterruptionLevel('medium')
+        setFollowUps(true)
+        setQuestionsAtEnd(true)
+        setUnexpectedQuestions(true)
+        setTimeLimitMinutes(10)
+      } else if (nextType === 'panel') {
+        setAudienceBehaviour('attentive')
+        setInterruptionLevel('medium')
+        setFollowUps(true)
+        setQuestionsAtEnd(true)
+        setUnexpectedQuestions(true)
+        setTimeLimitMinutes(15)
+      } else {
+        setAudienceBehaviour('supportive')
+        setInterruptionLevel('low')
+        setFollowUps(true)
+        setQuestionsAtEnd(true)
+        setUnexpectedQuestions(false)
+        setTimeLimitMinutes(15)
+      }
+    }
+    setPracticeType(nextType)
+  }
 
   const handleBack = () => {
     if (step === 1) {
       onCancel()
-    } else if (step === 2) {
-      setStep(1)
     } else {
-      setStep(2)
+      setStep((prev) => (prev - 1) as WizardStep)
     }
+  }
+
+  const handleTopicsChange = (nextTopics: Topic[]) => {
+    setTopics(nextTopics)
+    setIncludedTopicIds((prev) => {
+      const prevSet = new Set(prev)
+      const existingIds = new Set(topics.map((item) => item.id))
+      const nextIncluded = nextTopics
+        .filter((item) => prevSet.has(item.id) || !existingIds.has(item.id))
+        .map((item) => item.id)
+      return nextIncluded.length > 0 ? nextIncluded : nextTopics.map((item) => item.id)
+    })
   }
 
   const runExtraction = async (overrideSkip = false) => {
@@ -95,6 +164,7 @@ export function SessionWizard({
         interviewDetails,
       })
       setTopics(extracted)
+      setIncludedTopicIds(extracted.map((item) => item.id))
       if (!sessionTitle.trim()) {
         setSessionTitle(
           deriveDefaultSessionTitle(
@@ -111,11 +181,24 @@ export function SessionWizard({
     }
   }
 
+  const handleToggleTopicIncluded = (topicId: string) => {
+    setIncludedTopicIds((prev) => {
+      if (prev.includes(topicId)) {
+        if (prev.length <= 1) return prev
+        return prev.filter((id) => id !== topicId)
+      }
+      return [...prev, topicId]
+    })
+  }
+
   const buildSetup = (): SessionSetup => {
     const type: PracticeType = practiceType ?? 'presentation'
+    const isInterview = type === 'interview'
+
     const cleanedTopics = topics
       .map((item) => ({ ...item, title: item.title.trim() }))
       .filter((item) => item.title.length > 0)
+      .filter((item) => isInterview || includedTopicIds.includes(item.id))
 
     const fallbackTitle = deriveDefaultSessionTitle(type, files, interviewDetails, language)
 
@@ -123,17 +206,30 @@ export function SessionWizard({
       id: `setup-${Date.now().toString(36)}`,
       title: sessionTitle.trim() || fallbackTitle,
       practiceType: type,
-      venue: getDefaultVenueForPracticeType(type),
-      audienceBehaviour: type === 'interview' ? 'attentive' : 'supportive',
-      interruptionLevel: type === 'interview' ? 'medium' : 'low',
-      followUps: true,
-      questionsAtEnd: type !== 'interview',
-      unexpectedQuestions: type === 'pitch' || type === 'panel',
-      timeLimitMinutes: type === 'pitch' ? 5 : type === 'interview' ? 15 : 10,
-      oneMinWarning: true,
-      coachedMode: true,
-      goals: profile.practiceGoals.length > 0 ? profile.practiceGoals : ['steady_pace'],
+      venue,
+      audienceBehaviour,
+      interruptionLevel,
+      followUps,
+      questionsAtEnd: isInterview ? false : questionsAtEnd,
+      unexpectedQuestions: isInterview ? false : unexpectedQuestions,
+      timeLimitMinutes,
+      oneMinWarning,
+      coachedMode: isInterview ? coachedMode : false,
+      goals: isInterview
+        ? goals
+        : profile.practiceGoals.length > 0
+          ? profile.practiceGoals
+          : ['steady_pace'],
       topics: cleanedTopics,
+    }
+  }
+
+  const handleFinalize = async (launchImmediately: boolean) => {
+    setIsSaving(true)
+    try {
+      await onCompleteSetup(buildSetup(), launchImmediately)
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -160,7 +256,13 @@ export function SessionWizard({
             </span>
           )}
         </div>
-        <div className="wizard-step-bars" role="progressbar" aria-valuenow={step} aria-valuemin={1} aria-valuemax={TOTAL_WIZARD_STEPS}>
+        <div
+          className="wizard-step-bars"
+          role="progressbar"
+          aria-valuenow={step}
+          aria-valuemin={1}
+          aria-valuemax={TOTAL_WIZARD_STEPS}
+        >
           {Array.from({ length: TOTAL_WIZARD_STEPS }, (_, idx) => {
             const num = idx + 1
             const state = num < step ? 'done' : num === step ? 'active' : 'upcoming'
@@ -173,12 +275,7 @@ export function SessionWizard({
         <PracticeTypeScreen
           language={language}
           selected={practiceType}
-          onSelect={(nextType) => {
-            if (nextType !== practiceType) {
-              setSessionTitle('')
-            }
-            setPracticeType(nextType)
-          }}
+          onSelect={handleSelectPracticeType}
           onContinue={() => setStep(2)}
         />
       )}
@@ -214,10 +311,74 @@ export function SessionWizard({
           topics={topics}
           isExtracting={isExtracting}
           onSessionTitleChange={setSessionTitle}
-          onTopicsChange={setTopics}
+          onTopicsChange={handleTopicsChange}
           onReextract={() => void runExtraction(false)}
-          onSaveAndLaunch={() => onCompleteSetup(buildSetup(), true)}
-          onSaveOnly={() => onCompleteSetup(buildSetup(), false)}
+          onContinue={() => setStep(4)}
+        />
+      )}
+
+      {step === 4 && practiceType && practiceType !== 'interview' && (
+        <VenueAudienceScreen
+          language={language}
+          practiceType={practiceType}
+          venue={venue}
+          audienceBehaviour={audienceBehaviour}
+          interruptionLevel={interruptionLevel}
+          followUps={followUps}
+          questionsAtEnd={questionsAtEnd}
+          unexpectedQuestions={unexpectedQuestions}
+          onVenueChange={setVenue}
+          onBehaviourChange={setAudienceBehaviour}
+          onInterruptionChange={setInterruptionLevel}
+          onToggleFollowUps={() => setFollowUps((prev) => !prev)}
+          onToggleQuestionsAtEnd={() => setQuestionsAtEnd((prev) => !prev)}
+          onToggleUnexpectedQuestions={() => setUnexpectedQuestions((prev) => !prev)}
+          onContinue={() => setStep(5)}
+        />
+      )}
+
+      {step === 4 && practiceType === 'interview' && (
+        <GoalsInterviewerScreen
+          language={language}
+          goals={goals}
+          venue={venue === 'panel_room' ? 'panel_room' : 'interview_room'}
+          interviewerStyle={audienceBehaviour === 'distracted' ? 'attentive' : audienceBehaviour}
+          interruptionLevel={interruptionLevel}
+          followUps={followUps}
+          coachedMode={coachedMode}
+          onGoalsChange={setGoals}
+          onVenueChange={setVenue}
+          onStyleChange={setAudienceBehaviour}
+          onInterruptionChange={setInterruptionLevel}
+          onToggleFollowUps={() => setFollowUps((prev) => !prev)}
+          onToggleCoachedMode={() => setCoachedMode((prev) => !prev)}
+          onContinue={() => setStep(5)}
+        />
+      )}
+
+      {step === 5 && practiceType && (
+        <SessionReviewScreen
+          language={language}
+          practiceType={practiceType}
+          files={files}
+          outlineText={outlineText}
+          jobTitle={interviewDetails.jobTitle}
+          topics={topics}
+          includedTopicIds={includedTopicIds}
+          venue={venue}
+          audienceBehaviour={audienceBehaviour}
+          interruptionLevel={interruptionLevel}
+          goals={goals}
+          coachedMode={coachedMode}
+          timeLimitMinutes={timeLimitMinutes}
+          oneMinWarning={oneMinWarning}
+          isSaving={isSaving}
+          onToggleTopicIncluded={handleToggleTopicIncluded}
+          onTimeLimitChange={setTimeLimitMinutes}
+          onToggleOneMinWarning={() => setOneMinWarning((prev) => !prev)}
+          onJumpToStep={(target: EditableWizardStep) => setStep(target)}
+          onSendToHeadset={() => void handleFinalize(true)}
+          onSaveForLater={() => void handleFinalize(false)}
         />
       )}
     </section>

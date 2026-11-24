@@ -10,6 +10,7 @@ import {
   STARTER_WEEKLY_STATS,
   type AuthResult,
 } from '../lib/auth'
+import { loadSavedSetups, persistSavedSetup } from '../lib/savedSetups'
 import type {
   AppLanguage,
   AuthMode,
@@ -79,6 +80,17 @@ export function CompanionFlow({
     // Run once on mount to restore persisted auth state
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    let active = true
+    void loadSavedSetups(profile.id).then((loaded) => {
+      if (active) setSavedSetups(loaded)
+    })
+    return () => {
+      active = false
+    }
+  }, [profile?.id])
 
   const handleLanguageChange = (nextLang: AppLanguage) => {
     setStoredLanguage(nextLang)
@@ -194,11 +206,12 @@ export function CompanionFlow({
           profile={profile}
           onLanguageChange={handleLanguageChange}
           onCancel={() => setScreen('home')}
-          onCompleteSetup={(setup, launchImmediately) => {
-            setSavedSetups((prev) => [setup, ...prev])
+          onCompleteSetup={async (setup, launchImmediately) => {
+            const saved = await persistSavedSetup(profile.id, setup)
+            setSavedSetups((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)])
             setScreen('home')
             if (launchImmediately) {
-              onLaunchVR(setup.venue)
+              onLaunchVR(saved.venue)
             }
           }}
         />

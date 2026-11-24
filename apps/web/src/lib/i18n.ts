@@ -1,4 +1,11 @@
-import type { AppLanguage, PracticeType, UserRole, VenueType } from '../types/stagera'
+import type {
+  AppLanguage,
+  AudienceBehaviour,
+  InterruptionLevel,
+  PracticeType,
+  UserRole,
+  VenueType,
+} from '../types/stagera'
 
 export interface Translations {
   app: {
@@ -195,6 +202,77 @@ export interface Translations {
       sessionTitlePlaceholder: string
       saveAndLaunchVr: string
       saveToSetups: string
+    }
+    venueAudience: {
+      heading: string
+      subtitle: string
+      venueLabel: string
+      venues: Record<
+        'classroom' | 'lecture_hall' | 'auditorium' | 'panel_room',
+        { name: string; seats: string; desc: string }
+      >
+      behaviourLabel: string
+      behaviours: Record<AudienceBehaviour, { label: string; desc: string }>
+      interruptionsLabel: string
+      interruptionsHint: string
+      interruptions: Record<InterruptionLevel, { label: string; rate: string }>
+      qaOptionsLabel: string
+      followUpsTitle: string
+      followUpsDesc: string
+      questionsAtEndTitle: string
+      questionsAtEndDesc: string
+      unexpectedQuestionsTitle: string
+      unexpectedQuestionsDesc: string
+    }
+    goalsInterviewer: {
+      heading: string
+      subtitle: string
+      goalsLabel: string
+      goalsHint: string
+      goalsMaxReached: string
+      goalOptions: { id: string; label: string }[]
+      settingLabel: string
+      settings: Record<'interview_room' | 'panel_room', { name: string; seats: string; desc: string }>
+      styleLabel: string
+      styles: Record<'supportive' | 'attentive' | 'challenging', { label: string; desc: string }>
+      coachedTitle: string
+      coachedDesc: string
+      coachedBadgeNote: string
+    }
+    review: {
+      heading: string
+      subtitle: string
+      topicSubsetLabel: string
+      topicSubsetHint: string
+      topicSubsetSelected: string
+      timeLimitLabel: string
+      fullRehearsalChip: string
+      customMinutesLabel: string
+      oneMinWarningTitle: string
+      oneMinWarningDesc: string
+      summaryHeading: string
+      summaryTapHint: string
+      editLabel: string
+      rowPracticeType: string
+      rowMaterial: string
+      rowTopics: string
+      rowVenue: string
+      rowBehaviour: string
+      rowInterviewerStyle: string
+      rowInterruptions: string
+      rowGoals: string
+      rowCoached: string
+      materialFilesCount: string
+      materialOutlineOnly: string
+      materialNoSlides: string
+      topicsCountValue: string
+      onLabel: string
+      offLabel: string
+      coachedSeparateLabel: string
+      independentLabel: string
+      sendToHeadset: string
+      saveForLater: string
+      saving: string
     }
   }
 }
@@ -443,6 +521,126 @@ export const translations: Record<AppLanguage, Translations> = {
         saveAndLaunchVr: 'Save & launch VR',
         saveToSetups: 'Save to setups',
       },
+      venueAudience: {
+        heading: 'Venue & audience',
+        subtitle: 'Choose your room size, crowd energy, and how often the audience interrupts.',
+        venueLabel: 'Venue',
+        venues: {
+          classroom: {
+            name: 'Classroom',
+            seats: '30 seats',
+            desc: 'Intimate room for seminars, workshops, and pitches.',
+          },
+          lecture_hall: {
+            name: 'Lecture Hall',
+            seats: '60 seats',
+            desc: 'Tiered seating ideal for university talks and demos.',
+          },
+          auditorium: {
+            name: 'Auditorium',
+            seats: '200 seats',
+            desc: 'Large keynote stage with wide left/centre/right gaze zones.',
+          },
+          panel_room: {
+            name: 'Panel Room',
+            seats: '3 seats',
+            desc: 'Moderated table with fellow panelists and Q&A turn-taking.',
+          },
+        },
+        behaviourLabel: 'Audience behaviour',
+        behaviours: {
+          supportive: { label: 'Supportive', desc: 'Warm nods, encouraging posture' },
+          attentive: { label: 'Attentive', desc: 'Focused, neutral listening' },
+          distracted: { label: 'Distracted', desc: 'Phones, side glances, low energy' },
+          challenging: { label: 'Challenging', desc: 'Skeptical looks, tougher probes' },
+        },
+        interruptionsLabel: 'Interruption level',
+        interruptionsHint: 'Questions or interjections per 10 minutes',
+        interruptions: {
+          none: { label: 'None', rate: '0 / 10 min' },
+          low: { label: 'Low', rate: '1–2 / 10 min' },
+          medium: { label: 'Medium', rate: '3–5 / 10 min' },
+          high: { label: 'High', rate: '6–8 / 10 min' },
+        },
+        qaOptionsLabel: 'Q&A behaviour',
+        followUpsTitle: 'Follow-up questions',
+        followUpsDesc: 'Audience asks a second probing question based on your answer.',
+        questionsAtEndTitle: 'Questions at the end',
+        questionsAtEndDesc: 'Hold a dedicated Q&A round after your closing slide.',
+        unexpectedQuestionsTitle: 'Unexpected questions outside topics',
+        unexpectedQuestionsDesc: 'Include curveball questions beyond your uploaded outline.',
+      },
+      goalsInterviewer: {
+        heading: 'Goals & interviewer',
+        subtitle: 'Pick up to 3 focus goals and configure your interview room and difficulty.',
+        goalsLabel: 'Practice goals',
+        goalsHint: 'Select up to 3 goals',
+        goalsMaxReached: '3 / 3 selected',
+        goalOptions: [
+          { id: 'explain_contribution', label: 'Explain my project contribution' },
+          { id: 'handle_followups', label: 'Handle follow-up questions' },
+          { id: 'slow_down', label: 'Slow down' },
+          { id: 'keep_eye_contact', label: 'Keep eye contact' },
+          { id: 'fewer_fillers', label: 'Fewer filler words' },
+        ],
+        settingLabel: 'Interview setting',
+        settings: {
+          interview_room: {
+            name: 'Interview room',
+            seats: '1 interviewer',
+            desc: 'Focused 1-on-1 conversation across a desk.',
+          },
+          panel_room: {
+            name: 'Panel room',
+            seats: '3 interviewers',
+            desc: 'Multi-interviewer panel taking turns with follow-ups.',
+          },
+        },
+        styleLabel: 'Interviewer style',
+        styles: {
+          supportive: { label: 'Friendly', desc: 'Warm, conversational tone' },
+          attentive: { label: 'Neutral', desc: 'Structured, objective probing' },
+          challenging: { label: 'Tough', desc: 'Direct pushback & deep dives' },
+        },
+        coachedTitle: 'Coached mode',
+        coachedDesc: 'Show optional PAR & "I vs we" hints in your private VR panel during pauses.',
+        coachedBadgeNote: 'Coached attempts are tracked separately from independent attempts.',
+      },
+      review: {
+        heading: 'Session length & review',
+        subtitle: 'Set your time limit and double-check everything before sending to your headset.',
+        topicSubsetLabel: 'Topics to include in this run',
+        topicSubsetHint: 'Uncheck topics if you only want to rehearse a shorter section.',
+        topicSubsetSelected: '{selected} of {total} included',
+        timeLimitLabel: 'Time limit',
+        fullRehearsalChip: 'Full rehearsal',
+        customMinutesLabel: 'Rehearsal length (up to 90 min)',
+        oneMinWarningTitle: 'Warn me 1 minute before the limit',
+        oneMinWarningDesc: 'Subtle visual cue on your private VR confidence screen.',
+        summaryHeading: 'Session summary',
+        summaryTapHint: 'Tap any setting to jump back and edit.',
+        editLabel: 'Edit',
+        rowPracticeType: 'Practice type',
+        rowMaterial: 'Material',
+        rowTopics: 'Planned topics',
+        rowVenue: 'Venue',
+        rowBehaviour: 'Audience',
+        rowInterviewerStyle: 'Interviewer style',
+        rowInterruptions: 'Interruptions',
+        rowGoals: 'Focus goals',
+        rowCoached: 'Coached mode',
+        materialFilesCount: '{count} file(s) attached',
+        materialOutlineOnly: 'Pasted outline',
+        materialNoSlides: 'No slides (speaking only)',
+        topicsCountValue: '{count} topic(s)',
+        onLabel: 'On',
+        offLabel: 'Off',
+        coachedSeparateLabel: 'On (tracked separately)',
+        independentLabel: 'Off (independent)',
+        sendToHeadset: 'Send to headset',
+        saveForLater: 'Save setup for later',
+        saving: 'Saving setup…',
+      },
     },
   },
   fr: {
@@ -687,6 +885,126 @@ export const translations: Record<AppLanguage, Translations> = {
         sessionTitlePlaceholder: 'ex. Feuille de route produit T3',
         saveAndLaunchVr: 'Enregistrer et lancer VR',
         saveToSetups: 'Enregistrer la config',
+      },
+      venueAudience: {
+        heading: 'Salle et audience',
+        subtitle: 'Choisissez la taille de la salle, l’attitude du public et la fréquence des interruptions.',
+        venueLabel: 'Salle',
+        venues: {
+          classroom: {
+            name: 'Salle de classe',
+            seats: '30 places',
+            desc: 'Salle intimiste pour séminaires, ateliers et pitchs.',
+          },
+          lecture_hall: {
+            name: 'Amphithéâtre',
+            seats: '60 places',
+            desc: 'Gradins idéaux pour cours, soutenances et démonstrations.',
+          },
+          auditorium: {
+            name: 'Auditorium',
+            seats: '200 places',
+            desc: 'Grande scène de conférence avec larges zones de regard.',
+          },
+          panel_room: {
+            name: 'Salle de panel',
+            seats: '3 places',
+            desc: 'Table modérée avec co-panélistes et tours de parole.',
+          },
+        },
+        behaviourLabel: 'Comportement de l’audience',
+        behaviours: {
+          supportive: { label: 'Bienveillant', desc: 'Hochements de tête, posture encourageante' },
+          attentive: { label: 'Attentif', desc: 'Écoute concentrée et neutre' },
+          distracted: { label: 'Distrait', desc: 'Téléphones, regards ailleurs, faible énergie' },
+          challenging: { label: 'Exigeant', desc: 'Regards sceptiques, relances poussées' },
+        },
+        interruptionsLabel: 'Niveau d’interruption',
+        interruptionsHint: 'Questions ou interventions toutes les 10 minutes',
+        interruptions: {
+          none: { label: 'Aucune', rate: '0 / 10 min' },
+          low: { label: 'Faible', rate: '1–2 / 10 min' },
+          medium: { label: 'Moyen', rate: '3–5 / 10 min' },
+          high: { label: 'Élevé', rate: '6–8 / 10 min' },
+        },
+        qaOptionsLabel: 'Options de questions-réponses',
+        followUpsTitle: 'Questions de relance',
+        followUpsDesc: 'Le public pose une seconde question selon votre réponse.',
+        questionsAtEndTitle: 'Questions à la fin',
+        questionsAtEndDesc: 'Prévoit une séance de questions après la dernière diapositive.',
+        unexpectedQuestionsTitle: 'Questions imprévues hors sujets',
+        unexpectedQuestionsDesc: 'Ajoute des questions inattendues en dehors de votre plan.',
+      },
+      goalsInterviewer: {
+        heading: 'Objectifs et recruteur',
+        subtitle: 'Choisissez jusqu’à 3 objectifs prioritaires et configurez la salle d’entretien.',
+        goalsLabel: 'Objectifs de pratique',
+        goalsHint: 'Sélectionnez jusqu’à 3 objectifs',
+        goalsMaxReached: '3 / 3 sélectionnés',
+        goalOptions: [
+          { id: 'explain_contribution', label: 'Expliquer ma contribution au projet' },
+          { id: 'handle_followups', label: 'Gérer les questions de relance' },
+          { id: 'slow_down', label: 'Ralentir mon débit' },
+          { id: 'keep_eye_contact', label: 'Maintenir le contact visuel' },
+          { id: 'fewer_fillers', label: 'Moins de tics de langage' },
+        ],
+        settingLabel: 'Configuration de la salle',
+        settings: {
+          interview_room: {
+            name: 'Salle d’entretien',
+            seats: '1 recruteur',
+            desc: 'Échange individuel en face à face autour d’un bureau.',
+          },
+          panel_room: {
+            name: 'Salle de jury',
+            seats: '3 recruteurs',
+            desc: 'Jury de plusieurs recruteurs qui enchaînent les relances.',
+          },
+        },
+        styleLabel: 'Style du recruteur',
+        styles: {
+          supportive: { label: 'Bienveillant', desc: 'Ton chaleureux et conversationnel' },
+          attentive: { label: 'Neutre', desc: 'Questions structurées et objectives' },
+          challenging: { label: 'Exigeant', desc: 'Contre-arguments directs et approfondis' },
+        },
+        coachedTitle: 'Mode coaché',
+        coachedDesc: 'Affiche des indices PAR et « je vs nous » sur votre panneau privé VR lors des pauses.',
+        coachedBadgeNote: 'Les essais coachés sont suivis séparément des essais autonomes.',
+      },
+      review: {
+        heading: 'Durée et récapitulatif',
+        subtitle: 'Définissez votre limite de temps et vérifiez vos réglages avant l’envoi au casque.',
+        topicSubsetLabel: 'Sujets inclus dans cette répétition',
+        topicSubsetHint: 'Décochez des sujets si vous souhaitez répéter une partie plus courte.',
+        topicSubsetSelected: '{selected} sur {total} inclus',
+        timeLimitLabel: 'Limite de temps',
+        fullRehearsalChip: 'Répétition complète',
+        customMinutesLabel: 'Durée de répétition (jusqu’à 90 min)',
+        oneMinWarningTitle: 'M’avertir 1 minute avant la limite',
+        oneMinWarningDesc: 'Signal visuel discret sur votre écran de confiance privé en VR.',
+        summaryHeading: 'Récapitulatif de la session',
+        summaryTapHint: 'Touchez un réglage pour revenir à l’étape correspondante.',
+        editLabel: 'Modifier',
+        rowPracticeType: 'Type de pratique',
+        rowMaterial: 'Support',
+        rowTopics: 'Sujets prévus',
+        rowVenue: 'Salle',
+        rowBehaviour: 'Audience',
+        rowInterviewerStyle: 'Style du recruteur',
+        rowInterruptions: 'Interruptions',
+        rowGoals: 'Objectifs ciblés',
+        rowCoached: 'Mode coaché',
+        materialFilesCount: '{count} fichier(s) joint(s)',
+        materialOutlineOnly: 'Plan collé',
+        materialNoSlides: 'Sans diapositives (oral uniquement)',
+        topicsCountValue: '{count} sujet(s)',
+        onLabel: 'Activé',
+        offLabel: 'Désactivé',
+        coachedSeparateLabel: 'Activé (suivi séparé)',
+        independentLabel: 'Désactivé (autonome)',
+        sendToHeadset: 'Envoyer au casque',
+        saveForLater: 'Enregistrer pour plus tard',
+        saving: 'Enregistrement…',
       },
     },
   },

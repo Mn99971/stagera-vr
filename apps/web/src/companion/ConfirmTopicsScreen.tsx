@@ -11,8 +11,7 @@ interface ConfirmTopicsScreenProps {
   onSessionTitleChange: (title: string) => void
   onTopicsChange: (topics: Topic[]) => void
   onReextract: () => void
-  onSaveAndLaunch: () => void
-  onSaveOnly: () => void
+  onContinue: () => void
 }
 
 export function ConfirmTopicsScreen({
@@ -24,8 +23,7 @@ export function ConfirmTopicsScreen({
   onSessionTitleChange,
   onTopicsChange,
   onReextract,
-  onSaveAndLaunch,
-  onSaveOnly,
+  onContinue,
 }: ConfirmTopicsScreenProps) {
   const t = translations[language].wizard
   const [newTopicText, setNewTopicText] = useState('')
@@ -198,22 +196,13 @@ export function ConfirmTopicsScreen({
 
       <div className="wizard-footer-actions">
         <button
-          id="wizard-save-launch-btn"
+          id="wizard-step3-continue"
           type="button"
           className="btn-primary"
           disabled={validTopics.length === 0}
-          onClick={onSaveAndLaunch}
+          onClick={onContinue}
         >
-          {t.topics.saveAndLaunchVr}
-        </button>
-        <button
-          id="wizard-save-only-btn"
-          type="button"
-          className="btn-secondary"
-          disabled={validTopics.length === 0}
-          onClick={onSaveOnly}
-        >
-          {t.topics.saveToSetups}
+          {t.continue}
         </button>
       </div>
     </div>
