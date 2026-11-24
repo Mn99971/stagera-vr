@@ -14,12 +14,14 @@ import type {
   AppLanguage,
   AuthMode,
   CompanionScreen,
+  SessionSetup,
   UserProfile,
   VenueType,
 } from '../types/stagera'
 import { AuthScreen } from './AuthScreen'
 import { HomeDashboard } from './HomeDashboard'
 import { ProfileSetupScreen } from './ProfileSetupScreen'
+import { SessionWizard } from './SessionWizard'
 import { WelcomeScreen } from './WelcomeScreen'
 
 interface CompanionFlowProps {
@@ -56,6 +58,7 @@ export function CompanionFlow({
   const [authMode, setAuthMode] = useState<AuthMode>('signup')
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [editingProfile, setEditingProfile] = useState(false)
+  const [savedSetups, setSavedSetups] = useState<SessionSetup[]>(STARTER_SAVED_SETUPS)
 
   useEffect(() => {
     let active = true
@@ -169,7 +172,7 @@ export function CompanionFlow({
         <HomeDashboard
           profile={profile}
           language={language}
-          savedSetups={STARTER_SAVED_SETUPS}
+          savedSetups={savedSetups}
           sessions={STARTER_SESSIONS}
           weeklyStats={STARTER_WEEKLY_STATS}
           onLanguageChange={handleLanguageChange}
@@ -178,9 +181,26 @@ export function CompanionFlow({
             setEditingProfile(true)
             setScreen('profile_setup')
           }}
+          onStartNewSession={() => setScreen('new_session')}
           onLaunchVR={onLaunchVR}
           onOpenReport={onOpenReport}
           onSignOut={() => void handleSignOut()}
+        />
+      )}
+
+      {screen === 'new_session' && profile && (
+        <SessionWizard
+          language={language}
+          profile={profile}
+          onLanguageChange={handleLanguageChange}
+          onCancel={() => setScreen('home')}
+          onCompleteSetup={(setup, launchImmediately) => {
+            setSavedSetups((prev) => [setup, ...prev])
+            setScreen('home')
+            if (launchImmediately) {
+              onLaunchVR(setup.venue)
+            }
+          }}
         />
       )}
     </div>

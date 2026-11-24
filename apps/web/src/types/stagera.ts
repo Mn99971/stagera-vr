@@ -4,7 +4,7 @@ export type AudienceBehaviour = 'supportive' | 'attentive' | 'distracted' | 'cha
 export type InterruptionLevel = 'none' | 'low' | 'medium' | 'high'
 export type AppLanguage = 'en' | 'fr'
 export type UserRole = 'student' | 'lecturer' | 'job_seeker' | 'professional'
-export type CompanionScreen = 'welcome' | 'auth' | 'profile_setup' | 'home'
+export type CompanionScreen = 'welcome' | 'auth' | 'profile_setup' | 'home' | 'new_session'
 export type AuthMode = 'signup' | 'login'
 export type DashboardTab = 'home' | 'history' | 'progress' | 'settings'
 
@@ -14,6 +14,22 @@ export interface Topic {
   slideRange?: string
   brief: boolean
   covered?: boolean
+}
+
+export interface UploadedMaterialFile {
+  id: string
+  name: string
+  sizeBytes: number
+  extension: string
+  extractedText?: string
+  estimatedSlides?: number
+}
+
+export interface InterviewDetails {
+  jobTitle: string
+  jobDescription: string
+  projectSummary: string
+  cvFile: UploadedMaterialFile | null
 }
 
 export interface SessionSetup {
