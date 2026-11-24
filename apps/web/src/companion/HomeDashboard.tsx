@@ -20,18 +20,11 @@ interface HomeDashboardProps {
   onLanguageChange: (lang: AppLanguage) => void
   onUpdateProfile: (profile: UserProfile) => Promise<void>
   onEditProfile: () => void
+  onStartNewSession: () => void
   onLaunchVR: (venue: VenueType) => void
   onOpenReport: () => void
   onSignOut: () => void
 }
-
-const ALL_VENUES: VenueType[] = [
-  'classroom',
-  'lecture_hall',
-  'auditorium',
-  'interview_room',
-  'panel_room',
-]
 
 export function HomeDashboard({
   profile,
@@ -42,6 +35,7 @@ export function HomeDashboard({
   onLanguageChange,
   onUpdateProfile,
   onEditProfile,
+  onStartNewSession,
   onLaunchVR,
   onOpenReport,
   onSignOut,
@@ -49,8 +43,6 @@ export function HomeDashboard({
   const t = translations[language].home
   const profileT = translations[language].profile
   const [activeTab, setActiveTab] = useState<DashboardTab>('home')
-  const [showQuickLaunch, setShowQuickLaunch] = useState(false)
-  const [quickVenue, setQuickVenue] = useState<VenueType>('lecture_hall')
 
   const firstName = profile.fullName.trim().split(/\s+/)[0] || profile.email.split('@')[0]
   const lastSession = sessions[0] ?? null
@@ -97,52 +89,10 @@ export function HomeDashboard({
               id="home-new-session-btn"
               type="button"
               className="btn-primary"
-              onClick={() => setShowQuickLaunch((prev) => !prev)}
+              onClick={onStartNewSession}
             >
               <span>+ {t.newSession}</span>
             </button>
-
-            {showQuickLaunch && (
-              <div className="quick-launch-box" role="region" aria-label={t.quickLaunchTitle}>
-                <p className="section-label" style={{ marginBottom: 10 }}>
-                  {t.quickLaunchTitle}
-                </p>
-                <label htmlFor="quick-venue-select" className="field-label" style={{ marginBottom: 6 }}>
-                  {t.quickLaunchVenue}
-                </label>
-                <select
-                  id="quick-venue-select"
-                  className="text-input"
-                  value={quickVenue}
-                  onChange={(e) => setQuickVenue(e.target.value as VenueType)}
-                >
-                  {ALL_VENUES.map((v) => (
-                    <option key={v} value={v}>
-                      {t.venues[v]}
-                    </option>
-                  ))}
-                </select>
-                <div className="quick-launch-actions">
-                  <button
-                    id="quick-launch-go"
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => onLaunchVR(quickVenue)}
-                  >
-                    {t.quickLaunchStart}
-                  </button>
-                  <button
-                    id="quick-launch-cancel"
-                    type="button"
-                    className="btn-secondary"
-                    style={{ width: 'auto' }}
-                    onClick={() => setShowQuickLaunch(false)}
-                  >
-                    {t.quickLaunchCancel}
-                  </button>
-                </div>
-              </div>
-            )}
 
             <div className="stats-strip" aria-label={t.weeklyTitle}>
               <div className="stat-tile">

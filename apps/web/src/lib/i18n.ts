@@ -123,6 +123,80 @@ export interface Translations {
     venues: Record<VenueType, string>
     practiceTypes: Record<PracticeType, string>
   }
+  wizard: {
+    stepOfTotal: string
+    back: string
+    continue: string
+    extracting: string
+    practiceType: {
+      heading: string
+      subtitle: string
+      cards: Record<
+        PracticeType,
+        {
+          title: string
+          desc: string
+          venueHint: string
+        }
+      >
+    }
+    material: {
+      heading: string
+      subtitle: string
+      dropzoneTitle: string
+      dropzoneSubtitle: string
+      dropzoneLimit: string
+      browseBtn: string
+      uploadedFilesLabel: string
+      removeFile: string
+      outlineLabel: string
+      outlineOptional: string
+      outlinePlaceholder: string
+      skipNoSlides: string
+      errFileSize: string
+      errFileType: string
+    }
+    interview: {
+      heading: string
+      subtitle: string
+      jobTitleLabel: string
+      jobTitlePlaceholder: string
+      jdLabel: string
+      jdPlaceholder: string
+      projectLabel: string
+      projectPlaceholder: string
+      cvLabel: string
+      cvOptional: string
+      cvDropzoneTitle: string
+      cvDropzoneLimit: string
+      cvErrType: string
+      cvErrSize: string
+      removeCv: string
+      previewHeading: string
+      previewHint: string
+    }
+    topics: {
+      headingPresentation: string
+      headingInterview: string
+      subtitlePresentation: string
+      subtitleInterview: string
+      slideLabel: string
+      briefToggle: string
+      briefActiveLabel: string
+      moveUp: string
+      moveDown: string
+      deleteTopic: string
+      editTopicLabel: string
+      addPlaceholder: string
+      addBtn: string
+      reextractBtn: string
+      emptyNotice: string
+      sessionTitleLabel: string
+      sessionTitlePlaceholder: string
+      saveAndLaunchVr: string
+      saveToSetups: string
+    }
+  }
 }
 
 export const translations: Record<AppLanguage, Translations> = {
@@ -282,6 +356,94 @@ export const translations: Record<AppLanguage, Translations> = {
         panel: 'Panel',
       },
     },
+    wizard: {
+      stepOfTotal: 'Step {step} of {total}',
+      back: 'Back',
+      continue: 'Continue',
+      extracting: 'Extracting topics…',
+      practiceType: {
+        heading: 'Choose practice type',
+        subtitle: 'Pick the format that best matches your upcoming session.',
+        cards: {
+          presentation: {
+            title: 'Presentation / Lecture',
+            desc: 'Class talks, lectures, thesis defenses, or conference decks.',
+            venueHint: 'Classroom · Lecture Hall · Auditorium',
+          },
+          interview: {
+            title: 'Interview',
+            desc: '1-on-1 or panel Q&A with behavioral PAR & role-specific follow-ups.',
+            venueHint: 'Interview Room (1) · Panel Room (3)',
+          },
+          pitch: {
+            title: 'Pitch',
+            desc: 'Startup, product, or funding pitch with sharp investor questions.',
+            venueHint: 'Classroom · Lecture Hall',
+          },
+          panel: {
+            title: 'Panel discussion',
+            desc: 'Moderated discussion with multi-speaker turn-taking and pushback.',
+            venueHint: 'Panel Room (3)',
+          },
+        },
+      },
+      material: {
+        heading: 'Upload your material',
+        subtitle: 'Add your slides or notes so Stagera can track your topics and generate relevant Q&A.',
+        dropzoneTitle: 'Drag & drop files here, or tap to browse',
+        dropzoneSubtitle: 'PPTX, PDF, DOCX, or TXT',
+        dropzoneLimit: 'Up to 25 MB per file · up to 50 slides',
+        browseBtn: 'Choose file',
+        uploadedFilesLabel: 'Attached material',
+        removeFile: 'Remove',
+        outlineLabel: 'Or paste a short outline',
+        outlineOptional: 'Optional',
+        outlinePlaceholder: '1. Opening & context\n2. Key findings\n3. Live demo\n4. Conclusions & Q&A',
+        skipNoSlides: 'Skip (no slides)',
+        errFileSize: 'File exceeds the 25 MB limit. Please upload a smaller file.',
+        errFileType: 'Unsupported format. Please upload a PPTX, PDF, DOCX, or TXT file.',
+      },
+      interview: {
+        heading: 'Interview details',
+        subtitle: 'Share the role and a project you want to highlight so the AI interviewer tailors its questions.',
+        jobTitleLabel: 'Target job title',
+        jobTitlePlaceholder: 'e.g. Frontend Engineer, Product Manager',
+        jdLabel: 'Job description',
+        jdPlaceholder: 'Paste key responsibilities, required skills, or qualifications…',
+        projectLabel: 'Project summary',
+        projectPlaceholder: 'Briefly describe a project you led (problem, your actions, measurable result)…',
+        cvLabel: 'CV / Resume',
+        cvOptional: 'Optional',
+        cvDropzoneTitle: 'Upload CV (PDF or DOCX)',
+        cvDropzoneLimit: 'Up to 25 MB',
+        cvErrType: 'Unsupported CV format. Please upload a PDF or DOCX file.',
+        cvErrSize: 'CV exceeds the 25 MB limit.',
+        removeCv: 'Remove',
+        previewHeading: 'Themes we’ll ask about',
+        previewHint: 'Updates live as you add role details.',
+      },
+      topics: {
+        headingPresentation: 'Confirm planned topics',
+        headingInterview: 'Confirm interview themes',
+        subtitlePresentation: 'Edit, reorder, or mark topics as Brief before moving to venue & goals.',
+        subtitleInterview: 'Adjust the themes the AI interviewer will cover and mark any quick warm-ups as Brief.',
+        slideLabel: 'Slides',
+        briefToggle: 'Brief',
+        briefActiveLabel: 'Marked as brief',
+        moveUp: 'Move topic up',
+        moveDown: 'Move topic down',
+        deleteTopic: 'Delete topic',
+        editTopicLabel: 'Topic title',
+        addPlaceholder: 'Add another topic or theme…',
+        addBtn: 'Add',
+        reextractBtn: 'Re-extract from material',
+        emptyNotice: 'Add at least one topic so Stagera can track your coverage.',
+        sessionTitleLabel: 'Session title',
+        sessionTitlePlaceholder: 'e.g. Q3 Product Roadmap',
+        saveAndLaunchVr: 'Save & launch VR',
+        saveToSetups: 'Save to setups',
+      },
+    },
   },
   fr: {
     app: {
@@ -437,6 +599,94 @@ export const translations: Record<AppLanguage, Translations> = {
         interview: 'Entretien',
         pitch: 'Pitch',
         panel: 'Panel',
+      },
+    },
+    wizard: {
+      stepOfTotal: 'Étape {step} sur {total}',
+      back: 'Retour',
+      continue: 'Continuer',
+      extracting: 'Extraction des sujets…',
+      practiceType: {
+        heading: 'Choisir le type de pratique',
+        subtitle: 'Sélectionnez le format qui correspond le mieux à votre prochaine session.',
+        cards: {
+          presentation: {
+            title: 'Présentation / Cours',
+            desc: 'Exposés, cours magistraux, soutenances ou conférences avec diapositives.',
+            venueHint: 'Salle de classe · Amphithéâtre · Auditorium',
+          },
+          interview: {
+            title: 'Entretien',
+            desc: 'Entretien individuel ou jury avec relances comportementales (PAR) et techniques.',
+            venueHint: 'Salle d’entretien (1) · Salle de panel (3)',
+          },
+          pitch: {
+            title: 'Pitch',
+            desc: 'Pitch startup, produit ou levée de fonds avec questions incisives.',
+            venueHint: 'Salle de classe · Amphithéâtre',
+          },
+          panel: {
+            title: 'Table ronde / Panel',
+            desc: 'Discussion modérée à plusieurs intervenants avec relances et contre-arguments.',
+            venueHint: 'Salle de panel (3)',
+          },
+        },
+      },
+      material: {
+        heading: 'Importer votre support',
+        subtitle: 'Ajoutez vos diapositives ou notes afin que Stagera suive vos sujets et prépare les questions.',
+        dropzoneTitle: 'Glissez-déposez vos fichiers ici, ou touchez pour parcourir',
+        dropzoneSubtitle: 'PPTX, PDF, DOCX ou TXT',
+        dropzoneLimit: 'Jusqu’à 25 Mo par fichier · 50 diapositives max.',
+        browseBtn: 'Choisir un fichier',
+        uploadedFilesLabel: 'Supports ajoutés',
+        removeFile: 'Retirer',
+        outlineLabel: 'Ou collez un court plan',
+        outlineOptional: 'Facultatif',
+        outlinePlaceholder: '1. Accroche et contexte\n2. Résultats clés\n3. Démo en direct\n4. Conclusion et questions',
+        skipNoSlides: 'Passer (sans diapositives)',
+        errFileSize: 'Le fichier dépasse la limite de 25 Mo. Veuillez choisir un fichier plus léger.',
+        errFileType: 'Format non pris en charge. Importez un fichier PPTX, PDF, DOCX ou TXT.',
+      },
+      interview: {
+        heading: 'Détails de l’entretien',
+        subtitle: 'Indiquez le poste visé et un projet marquant pour adapter les questions du recruteur IA.',
+        jobTitleLabel: 'Poste visé',
+        jobTitlePlaceholder: 'ex. Ingénieur Frontend, Chef de produit',
+        jdLabel: 'Description du poste',
+        jdPlaceholder: 'Collez les missions principales, compétences requises ou qualifications…',
+        projectLabel: 'Résumé de projet',
+        projectPlaceholder: 'Décrivez brièvement un projet mené (problème, vos actions, résultat mesurable)…',
+        cvLabel: 'CV',
+        cvOptional: 'Facultatif',
+        cvDropzoneTitle: 'Importer un CV (PDF ou DOCX)',
+        cvDropzoneLimit: 'Jusqu’à 25 Mo',
+        cvErrType: 'Format de CV non pris en charge. Importez un fichier PDF ou DOCX.',
+        cvErrSize: 'Le CV dépasse la limite de 25 Mo.',
+        removeCv: 'Retirer',
+        previewHeading: 'Thèmes que nous aborderons',
+        previewHint: 'Se met à jour en direct selon vos informations.',
+      },
+      topics: {
+        headingPresentation: 'Confirmer les sujets prévus',
+        headingInterview: 'Confirmer les thèmes d’entretien',
+        subtitlePresentation: 'Modifiez, réordonnez ou marquez les sujets comme Bref avant de passer à la salle et aux objectifs.',
+        subtitleInterview: 'Ajustez les thèmes que le recruteur IA abordera et marquez les introductions rapides comme Bref.',
+        slideLabel: 'Diapos',
+        briefToggle: 'Bref',
+        briefActiveLabel: 'Marqué comme bref',
+        moveUp: 'Monter le sujet',
+        moveDown: 'Descendre le sujet',
+        deleteTopic: 'Supprimer le sujet',
+        editTopicLabel: 'Titre du sujet',
+        addPlaceholder: 'Ajouter un autre sujet ou thème…',
+        addBtn: 'Ajouter',
+        reextractBtn: 'Ré-extraire depuis le support',
+        emptyNotice: 'Ajoutez au moins un sujet pour que Stagera suive votre couverture.',
+        sessionTitleLabel: 'Titre de la session',
+        sessionTitlePlaceholder: 'ex. Feuille de route produit T3',
+        saveAndLaunchVr: 'Enregistrer et lancer VR',
+        saveToSetups: 'Enregistrer la config',
       },
     },
   },
