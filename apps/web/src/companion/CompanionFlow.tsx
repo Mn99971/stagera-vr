@@ -6,8 +6,6 @@ import {
   setStoredLanguage,
   signOutUser,
   STARTER_SAVED_SETUPS,
-  STARTER_SESSIONS,
-  STARTER_WEEKLY_STATS,
   type AuthResult,
 } from '../lib/auth'
 import { loadSavedSetups, persistSavedSetup } from '../lib/savedSetups'
@@ -15,6 +13,7 @@ import type {
   AppLanguage,
   AuthMode,
   CompanionScreen,
+  SessionRecord,
   SessionSetup,
   UserProfile,
 } from '../types/stagera'
@@ -27,9 +26,14 @@ import { WelcomeScreen } from './WelcomeScreen'
 
 interface CompanionFlowProps {
   language: AppLanguage
+  sessions: SessionRecord[]
   onLanguageChange: (lang: AppLanguage) => void
   onLaunchVR: (setup: SessionSetup) => void
-  onOpenReport: () => void
+  onOpenReport: (record?: SessionRecord) => void
+  onRenameSession: (sessionId: string, newTitle: string) => Promise<void>
+  onDeleteSession: (sessionId: string) => Promise<void>
+  onDeleteAllRecordings: () => Promise<void>
+  onUserChange?: (userId: string | undefined) => void
 }
 
 function createDraftProfile(auth: AuthResult, language: AppLanguage): UserProfile {
@@ -51,9 +55,14 @@ function createDraftProfile(auth: AuthResult, language: AppLanguage): UserProfil
 
 export function CompanionFlow({
   language,
+  sessions,
   onLanguageChange,
   onLaunchVR,
   onOpenReport,
+  onRenameSession,
+  onDeleteSession,
+  onDeleteAllRecordings,
+  onUserChange,
 }: CompanionFlowProps) {
   const [screen, setScreen] = useState<CompanionScreen>('welcome')
   const [authMode, setAuthMode] = useState<AuthMode>('signup')
@@ -68,10 +77,12 @@ export function CompanionFlow({
       if (!active || !restored) return
       if (restored.hasProfile && restored.profile) {
         setProfile(restored.profile)
+        onUserChange?.(restored.profile.id)
         onLanguageChange(restored.profile.appLanguage)
         setScreen('home')
       } else {
         setProfile(createDraftProfile(restored, language))
+        onUserChange?.(restored.userId)
         setScreen('profile_setup')
       }
     })
@@ -106,6 +117,7 @@ export function CompanionFlow({
   }
 
   const handleAuthSuccess = (result: AuthResult) => {
+    onUserChange?.(result.userId)
     if (result.hasProfile && result.profile) {
       setProfile(result.profile)
       onLanguageChange(result.profile.appLanguage)
@@ -132,6 +144,7 @@ export function CompanionFlow({
   const handleSignOut = async () => {
     await signOutUser()
     setProfile(null)
+    onUserChange?.(undefined)
     setEditingProfile(false)
     setPairingSetup(null)
     setScreen('welcome')
@@ -187,8 +200,7 @@ export function CompanionFlow({
           profile={profile}
           language={language}
           savedSetups={savedSetups}
-          sessions={STARTER_SESSIONS}
-          weeklyStats={STARTER_WEEKLY_STATS}
+          sessions={sessions}
           onLanguageChange={handleLanguageChange}
           onUpdateProfile={handleUpdateProfile}
           onEditProfile={() => {
@@ -200,7 +212,11 @@ export function CompanionFlow({
             setPairingSetup(setup)
             setScreen('connect_headset')
           }}
+          onLaunchDirectVR={onLaunchVR}
           onOpenReport={onOpenReport}
+          onRenameSession={onRenameSession}
+          onDeleteSession={onDeleteSession}
+          onDeleteAllRecordings={onDeleteAllRecordings}
           onSignOut={() => void handleSignOut()}
         />
       )}

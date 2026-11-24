@@ -3,25 +3,30 @@ import { getGreeting, translations } from '../lib/i18n'
 import type {
   AppLanguage,
   DashboardTab,
+  SessionRecord,
   SessionSetup,
-  SessionSummary,
   UserProfile,
-  WeeklyStats,
 } from '../types/stagera'
 import { LanguageToggle } from './LanguageToggle'
+import { PrivacySettingsScreen } from './PrivacySettingsScreen'
+import { ProgressDashboardScreen } from './ProgressDashboardScreen'
+import { SessionHistoryScreen } from './SessionHistoryScreen'
 
 interface HomeDashboardProps {
   profile: UserProfile
   language: AppLanguage
   savedSetups: SessionSetup[]
-  sessions: SessionSummary[]
-  weeklyStats: WeeklyStats
+  sessions: SessionRecord[]
   onLanguageChange: (lang: AppLanguage) => void
   onUpdateProfile: (profile: UserProfile) => Promise<void>
   onEditProfile: () => void
   onStartNewSession: () => void
   onLaunchVR: (setup: SessionSetup) => void
-  onOpenReport: () => void
+  onLaunchDirectVR: (setup: SessionSetup) => void
+  onOpenReport: (record?: SessionRecord) => void
+  onRenameSession: (sessionId: string, newTitle: string) => Promise<void>
+  onDeleteSession: (sessionId: string) => Promise<void>
+  onDeleteAllRecordings: () => Promise<void>
   onSignOut: () => void
 }
 
@@ -30,13 +35,16 @@ export function HomeDashboard({
   language,
   savedSetups,
   sessions,
-  weeklyStats,
   onLanguageChange,
   onUpdateProfile,
   onEditProfile,
   onStartNewSession,
   onLaunchVR,
+  onLaunchDirectVR,
   onOpenReport,
+  onRenameSession,
+  onDeleteSession,
+  onDeleteAllRecordings,
   onSignOut,
 }: HomeDashboardProps) {
   const t = translations[language].home
@@ -45,19 +53,13 @@ export function HomeDashboard({
 
   const firstName = profile.fullName.trim().split(/\s+/)[0] || profile.email.split('@')[0]
   const lastSession = sessions[0] ?? null
-  const goalPct = Math.min(
-    100,
-    Math.round((weeklyStats.sessionsThisWeek / Math.max(1, weeklyStats.targetSessions)) * 100),
+  const totalMinutes = Math.round(
+    sessions.reduce((acc, s) => acc + s.durationSeconds, 0) / 60,
   )
-
-  const handleToggleSetting = (
-    key: 'captionsEnabled' | 'keepRecordings' | 'autoDelete30d',
-  ) => {
-    void onUpdateProfile({
-      ...profile,
-      [key]: !profile[key],
-    })
-  }
+  const avgWpm =
+    sessions.length > 0
+      ? Math.round(sessions.reduce((acc, s) => acc + s.wpm, 0) / sessions.length)
+      : 0
 
   return (
     <>
@@ -95,17 +97,17 @@ export function HomeDashboard({
 
             <div className="stats-strip" aria-label={t.weeklyTitle}>
               <div className="stat-tile">
-                <span className="stat-value">{weeklyStats.sessionsThisWeek}</span>
+                <span className="stat-value">{sessions.length}</span>
                 <span className="stat-label">{t.weeklySessions}</span>
               </div>
               <div className="stat-tile">
                 <span className="stat-value">
-                  {weeklyStats.totalMinutes} {t.minUnit}
+                  {totalMinutes} {t.minUnit}
                 </span>
                 <span className="stat-label">{t.weeklyMinutes}</span>
               </div>
               <div className="stat-tile">
-                <span className="stat-value">{weeklyStats.avgWpm}</span>
+                <span className="stat-value">{avgWpm}</span>
                 <span className="stat-label">{t.weeklyAvgWpm}</span>
               </div>
             </div>
@@ -178,7 +180,9 @@ export function HomeDashboard({
                     </div>
                     <div className="metric-box">
                       <span className="metric-box-label">{t.metricEyeContact}</span>
-                      <span className="metric-box-value">{lastSession.eyeContactPct}%</span>
+                      <span className="metric-box-value">
+                        {lastSession.eyeContactZones.centre}%
+                      </span>
                     </div>
                     <div className="metric-box">
                       <span className="metric-box-label">{t.metricTopics}</span>
@@ -192,7 +196,7 @@ export function HomeDashboard({
                     id="home-view-report-btn"
                     type="button"
                     className="btn-secondary"
-                    onClick={onOpenReport}
+                    onClick={() => onOpenReport(lastSession)}
                   >
                     {t.viewReport}
                   </button>
@@ -207,162 +211,35 @@ export function HomeDashboard({
         )}
 
         {activeTab === 'history' && (
-          <>
-            <h1 className="screen-title">{t.historyTitle}</h1>
-            <p className="screen-subtitle">{t.historySubtitle}</p>
-            <div className="setup-list">
-              {sessions.map((s) => (
-                <div key={s.id} className="dash-card" style={{ marginBottom: 0 }}>
-                  <div className="dash-card-header">
-                    <h2 className="dash-card-title">{s.title}</h2>
-                    <span className="dash-card-meta">{s.wpm} WPM</span>
-                  </div>
-                  <div className="setup-row-sub" style={{ marginBottom: 10 }}>
-                    <span>{t.practiceTypes[s.practiceType]}</span>
-                    <span>·</span>
-                    <span>{t.venues[s.venue]}</span>
-                    <span>·</span>
-                    <span>
-                      {s.fillerCount} {t.metricFillers.toLowerCase()}
-                    </span>
-                  </div>
-                  <button type="button" className="btn-small-ghost" onClick={onOpenReport}>
-                    {t.viewReport}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
+          <SessionHistoryScreen
+            sessions={sessions}
+            language={language}
+            onOpenReport={(rec) => onOpenReport(rec)}
+            onRenameSession={onRenameSession}
+            onDeleteSession={onDeleteSession}
+          />
         )}
 
         {activeTab === 'progress' && (
-          <>
-            <h1 className="screen-title">{t.progressTitle}</h1>
-            <p className="screen-subtitle">{t.progressSubtitle}</p>
-
-            <div className="dash-card">
-              <div className="dash-card-header">
-                <h2 className="dash-card-title">{t.progressTargetLabel}</h2>
-                <span className="dash-card-meta">
-                  {weeklyStats.sessionsThisWeek} / {weeklyStats.targetSessions}
-                </span>
-              </div>
-              <div className="progress-track" role="progressbar" aria-valuenow={goalPct} aria-valuemin={0} aria-valuemax={100}>
-                <div className="progress-fill" style={{ width: `${goalPct}%` }} />
-              </div>
-              <p className="setting-desc">{t.progressWpmRange}</p>
-            </div>
-
-            <div className="stats-strip">
-              <div className="stat-tile">
-                <span className="stat-value">{weeklyStats.sessionsThisWeek}</span>
-                <span className="stat-label">{t.weeklySessions}</span>
-              </div>
-              <div className="stat-tile">
-                <span className="stat-value">
-                  {weeklyStats.totalMinutes} {t.minUnit}
-                </span>
-                <span className="stat-label">{t.weeklyMinutes}</span>
-              </div>
-              <div className="stat-tile">
-                <span className="stat-value">{weeklyStats.avgWpm}</span>
-                <span className="stat-label">{t.weeklyAvgWpm}</span>
-              </div>
-            </div>
-          </>
+          <ProgressDashboardScreen
+            sessions={sessions}
+            language={language}
+            onRaiseDifficulty={onLaunchDirectVR}
+          />
         )}
 
         {activeTab === 'settings' && (
-          <>
-            <h1 className="screen-title">{t.settingsTitle}</h1>
-
-            <div className="dash-card">
-              <div className="dash-card-header">
-                <h2 className="dash-card-title">{t.settingsAccount}</h2>
-                {profile.isDemo && <span className="tag-coached">{t.settingsDemoBadge}</span>}
-              </div>
-              <p className="setup-row-title">{profile.fullName}</p>
-              <p className="setting-desc" style={{ marginBottom: 12 }}>
-                {profile.email} · {profileT.roles[profile.role].label}
-              </p>
-              <button
-                id="settings-edit-profile-btn"
-                type="button"
-                className="btn-small-ghost"
-                onClick={onEditProfile}
-              >
-                {t.settingsEditProfile}
-              </button>
-            </div>
-
-            <div className="dash-card">
-              <div className="setting-row">
-                <div>
-                  <p className="setting-title">{t.settingsLanguage}</p>
-                </div>
-                <LanguageToggle
-                  language={language}
-                  onChange={onLanguageChange}
-                  idPrefix="settings-lang"
-                />
-              </div>
-
-              <div className="setting-row">
-                <div>
-                  <p className="setting-title">{t.settingsCaptions}</p>
-                  <p className="setting-desc">{t.settingsCaptionsDesc}</p>
-                </div>
-                <button
-                  id="settings-toggle-captions"
-                  type="button"
-                  role="switch"
-                  aria-checked={profile.captionsEnabled}
-                  className={`toggle-switch ${profile.captionsEnabled ? 'on' : ''}`}
-                  onClick={() => handleToggleSetting('captionsEnabled')}
-                >
-                  <span className="toggle-thumb" />
-                </button>
-              </div>
-
-              <div className="setting-row">
-                <div>
-                  <p className="setting-title">{t.settingsKeepRecordings}</p>
-                  <p className="setting-desc">{t.settingsKeepRecordingsDesc}</p>
-                </div>
-                <button
-                  id="settings-toggle-recordings"
-                  type="button"
-                  role="switch"
-                  aria-checked={profile.keepRecordings}
-                  className={`toggle-switch ${profile.keepRecordings ? 'on' : ''}`}
-                  onClick={() => handleToggleSetting('keepRecordings')}
-                >
-                  <span className="toggle-thumb" />
-                </button>
-              </div>
-
-              <div className="setting-row">
-                <div>
-                  <p className="setting-title">{t.settingsAutoDelete}</p>
-                  <p className="setting-desc">{t.settingsAutoDeleteDesc}</p>
-                </div>
-                <button
-                  id="settings-toggle-autodelete"
-                  type="button"
-                  role="switch"
-                  aria-checked={profile.autoDelete30d}
-                  className={`toggle-switch ${profile.autoDelete30d ? 'on' : ''}`}
-                  onClick={() => handleToggleSetting('autoDelete30d')}
-                >
-                  <span className="toggle-thumb" />
-                </button>
-              </div>
-            </div>
-
-            <button id="settings-signout-btn" type="button" className="btn-secondary" onClick={onSignOut}>
-              {t.settingsSignOut}
-            </button>
-          </>
+          <PrivacySettingsScreen
+            profile={profile}
+            language={language}
+            savedSetups={savedSetups}
+            sessions={sessions}
+            onLanguageChange={onLanguageChange}
+            onUpdateProfile={onUpdateProfile}
+            onEditProfile={onEditProfile}
+            onDeleteAllRecordings={onDeleteAllRecordings}
+            onSignOut={onSignOut}
+          />
         )}
       </section>
 
