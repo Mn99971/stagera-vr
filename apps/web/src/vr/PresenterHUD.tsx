@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { QAQuestion } from '../ai/qaEngine'
 import { translations } from '../lib/i18n'
 import type { AppLanguage, SessionSetup, Topic } from '../types/stagera'
 
@@ -10,11 +11,17 @@ interface PresenterHUDProps {
   coveredIds: Set<string>
   elapsedSeconds: number
   remainingSeconds: number
+  liveWpm: number
+  liveFillers: number
   panelVisible: boolean
   isPaused: boolean
+  isXRPresenting: boolean
   captionsEnabled: boolean
   hintUsed: boolean
   liveCaption: string
+  lastAutoSavedAt: string | null
+  activeQuestion: QAQuestion | null
+  answerSeconds: number
   onPrevSlide: () => void
   onNextSlide: () => void
   onJumpToSlide: (index: number) => void
@@ -22,9 +29,15 @@ interface PresenterHUDProps {
   onTogglePause: () => void
   onEnterVR: () => void
   onVoiceFeedback: (message: string) => void
+  onSpeechTranscript: (text: string) => void
+  onSimulateSpeech: () => void
+  onTriggerQuestion: () => void
+  onFinishAnswer: () => void
+  onReturnToSlide: () => void
 }
 
 interface SpeechRecognitionEventLike {
+  resultIndex?: number
   results: ArrayLike<{
     isFinal?: boolean
     0?: { transcript?: string }
@@ -59,11 +72,17 @@ export function PresenterHUD({
   coveredIds,
   elapsedSeconds,
   remainingSeconds,
+  liveWpm,
+  liveFillers,
   panelVisible,
   isPaused,
+  isXRPresenting,
   captionsEnabled,
   hintUsed,
   liveCaption,
+  lastAutoSavedAt,
+  activeQuestion,
+  answerSeconds,
   onPrevSlide,
   onNextSlide,
   onJumpToSlide,
@@ -71,8 +90,14 @@ export function PresenterHUD({
   onTogglePause,
   onEnterVR,
   onVoiceFeedback,
+  onSpeechTranscript,
+  onSimulateSpeech,
+  onTriggerQuestion,
+  onFinishAnswer,
+  onReturnToSlide,
 }: PresenterHUDProps) {
   const t = translations[language].vr.hud
+  const qaT = translations[language].vr.qa
   const homeT = translations[language].home
 
   const [voiceActive, setVoiceActive] = useState(false)
@@ -116,7 +141,7 @@ export function PresenterHUD({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isPaused, onNextSlide, onPrevSlide, onTogglePanel, onTogglePause])
 
-  // Web Speech API voice commands: "next slide" / "previous slide" (EN & FR)
+  // Web Speech API: live transcription + slide voice commands ("next slide" / "previous slide")
   useEffect(() => {
     if (!voiceActive || isPaused) {
       if (recognitionRef.current) {
@@ -139,27 +164,41 @@ export function PresenterHUD({
     rec.lang = language === 'fr' ? 'fr-FR' : 'en-US'
 
     rec.onresult = (event) => {
-      const now = Date.now()
-      if (now - lastCommandAtRef.current < 1100) return
-      const last = event.results[event.results.length - 1]
-      const transcript = (last?.[0]?.transcript ?? '').toLowerCase()
+      const startIdx = event.resultIndex ?? event.results.length - 1
+      for (let i = startIdx; i < event.results.length; i++) {
+        const res = event.results[i]
+        const rawTranscript = (res?.[0]?.transcript ?? '').trim()
+        if (!rawTranscript) continue
+        const lower = rawTranscript.toLowerCase()
+        const now = Date.now()
 
-      if (
-        transcript.includes('next slide') ||
-        transcript.includes('diapositive suivante') ||
-        transcript.includes('diapo suivante')
-      ) {
-        lastCommandAtRef.current = now
-        onNextSlide()
-        onVoiceFeedback(t.voiceHeardNext)
-      } else if (
-        transcript.includes('previous slide') ||
-        transcript.includes('diapositive précédente') ||
-        transcript.includes('diapo précédente')
-      ) {
-        lastCommandAtRef.current = now
-        onPrevSlide()
-        onVoiceFeedback(t.voiceHeardPrev)
+        if (
+          now - lastCommandAtRef.current >= 1100 &&
+          (lower.includes('next slide') ||
+            lower.includes('diapositive suivante') ||
+            lower.includes('diapo suivante'))
+        ) {
+          lastCommandAtRef.current = now
+          onNextSlide()
+          onVoiceFeedback(t.voiceHeardNext)
+          continue
+        }
+
+        if (
+          now - lastCommandAtRef.current >= 1100 &&
+          (lower.includes('previous slide') ||
+            lower.includes('diapositive précédente') ||
+            lower.includes('diapo précédente'))
+        ) {
+          lastCommandAtRef.current = now
+          onPrevSlide()
+          onVoiceFeedback(t.voiceHeardPrev)
+          continue
+        }
+
+        if (res.isFinal) {
+          onSpeechTranscript(rawTranscript)
+        }
       }
     }
 
@@ -192,7 +231,17 @@ export function PresenterHUD({
         // Ignore
       }
     }
-  }, [voiceActive, isPaused, language, onNextSlide, onPrevSlide, onVoiceFeedback, t.voiceHeardNext, t.voiceHeardPrev])
+  }, [
+    voiceActive,
+    isPaused,
+    language,
+    onNextSlide,
+    onPrevSlide,
+    onSpeechTranscript,
+    onVoiceFeedback,
+    t.voiceHeardNext,
+    t.voiceHeardPrev,
+  ])
 
   const totalSlides = Math.max(1, topics.length)
   const isInterview = setup.practiceType === 'interview'
@@ -213,6 +262,7 @@ export function PresenterHUD({
           <span>
             {homeT.venues[setup.venue]} · {counterText}
             {hintUsed ? ` · ${t.hintUsedBadge}` : ''}
+            {lastAutoSavedAt ? ` · ${t.autoSavedBadge} ${lastAutoSavedAt}` : ''}
           </span>
         </div>
 
@@ -244,6 +294,26 @@ export function PresenterHUD({
             onClick={() => setVoiceActive((prev) => !prev)}
           >
             {!speechSupported ? t.voiceUnsupported : voiceActive ? t.voiceOn : t.voiceOff}
+          </button>
+          {!isXRPresenting && (
+            <button
+              id="hud-simulate-speech-btn"
+              type="button"
+              className="vr-hud-btn"
+              disabled={isPaused}
+              onClick={onSimulateSpeech}
+            >
+              🎙 {t.simulateSpeechBtn}
+            </button>
+          )}
+          <button
+            id="hud-trigger-question-btn"
+            type="button"
+            className="vr-hud-btn"
+            disabled={isPaused}
+            onClick={onTriggerQuestion}
+          >
+            ✋ {t.triggerQuestionBtn}
           </button>
           <button
             id="hud-panel-toggle-btn"
@@ -284,6 +354,51 @@ export function PresenterHUD({
         </div>
       )}
 
+      {/* S2.3 Live Q&A Answering HUD */}
+      {activeQuestion && !isPaused && (
+        <div id="hud-qa-card" className="vr-qa-card" role="dialog" aria-label={qaT.answeringKicker}>
+          <div className="vr-qa-top">
+            <span className="vr-qa-speaker">
+              {qaT.answeringKicker} · {activeQuestion.speakerLabel}
+            </span>
+            <div className="vr-qa-timer-pill">
+              <span>{qaT.answerTimerLabel}:</span>
+              <strong
+                className={
+                  answerSeconds > 45 ? 'danger' : answerSeconds >= 35 ? 'warn' : ''
+                }
+              >
+                {formatClock(answerSeconds)}
+              </strong>
+              <span className="vr-qa-aim">({qaT.aimUnder45})</span>
+            </div>
+          </div>
+
+          <p className="vr-qa-question-text">“{activeQuestion.text}”</p>
+
+          <div className="vr-qa-actions">
+            {setup.followUps && !activeQuestion.isFollowUp && (
+              <button
+                id="qa-followup-btn"
+                type="button"
+                className="btn-small"
+                onClick={onFinishAnswer}
+              >
+                {qaT.doneAnsweringBtn} → {qaT.askFollowUpBtn}
+              </button>
+            )}
+            <button
+              id="qa-return-slide-btn"
+              type="button"
+              className="vr-hud-btn"
+              onClick={onReturnToSlide}
+            >
+              {qaT.returnToSlideBtn.replace('{num}', String(activeQuestion.slideIndex + 1))}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Toggleable Private Presenter Panel (NFR-10: large readable text >=32px equivalent) */}
       {panelVisible && (
         <aside className="vr-private-panel" aria-label={t.topicsHeading}>
@@ -302,6 +417,16 @@ export function PresenterHUD({
                 {formatClock(remainingSeconds)}
               </span>
             </div>
+          </div>
+
+          <div className="vr-live-delivery-strip">
+            <span>
+              <strong>{liveWpm}</strong> {t.wpmLiveLabel}
+            </span>
+            <span>·</span>
+            <span>
+              <strong>{liveFillers}</strong> {t.fillersLiveLabel}
+            </span>
           </div>
 
           <div className="vr-private-slide-badge">{counterText}</div>

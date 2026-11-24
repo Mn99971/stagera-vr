@@ -91,3 +91,53 @@ export interface WeeklyStats {
   avgWpm: number
   targetSessions: number
 }
+
+export interface GazeZones {
+  left: number
+  centre: number
+  right: number
+}
+
+export type FlaggedMomentType =
+  | 'question'
+  | 'skipped_slide'
+  | 'long_pause'
+  | 'pace_spike'
+  | 'hint_used'
+  | 'we_ownership'
+
+export interface FlaggedMoment {
+  id: string
+  timestampSeconds: number
+  momentType: FlaggedMomentType
+  label: string
+  transcriptExcerpt?: string
+  aiTip?: string
+  slideIndex?: number
+  recoverySuccessful?: boolean
+}
+
+export interface SessionRecord {
+  id: string
+  setupId?: string
+  title: string
+  practiceType: PracticeType
+  venue: VenueType
+  coachedMode: boolean
+  hintUsed: boolean
+  durationSeconds: number
+  timeLimitMinutes: number
+  wpm: number
+  fillerCount: number
+  fillerBreakdown: Record<string, number>
+  eyeContactZones: GazeZones
+  topicsCovered: number
+  topicsTotal: number
+  iCount: number
+  weCount: number
+  transcript: string
+  recommendations: string[]
+  flaggedMoments: FlaggedMoment[]
+  goals: string[]
+  createdAt: string
+}

@@ -2,10 +2,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { XR, createXRStore } from '@react-three/xr'
 import * as THREE from 'three'
+import {
+  generateAudienceQuestion,
+  generateFollowUpQuestion,
+  speakQuestionTTS,
+  stopTTS,
+  type QAQuestion,
+} from '../ai/qaEngine'
+import {
+  getSimulatedSpeechSample,
+  SpeechDeliveryAnalyzer,
+} from '../ai/speechAnalyzer'
 import { translations } from '../lib/i18n'
+import {
+  buildSessionRecord,
+  createSessionId,
+  OptionalAudioRecorder,
+  saveSessionSnapshot,
+} from '../lib/sessionRecorder'
 import type {
   AppLanguage,
   AudienceBehaviour,
+  FlaggedMoment,
+  FlaggedMomentType,
+  GazeZones,
+  InterruptionLevel,
+  SessionRecord,
   SessionSetup,
   Topic,
   VenueType,
@@ -13,8 +35,12 @@ import type {
 import { PauseMenu } from './PauseMenu'
 import { PresenterHUD } from './PresenterHUD'
 import { VRLobbyCheck } from './VRLobbyCheck'
+import { VRQuickDebrief } from './VRQuickDebrief'
 
 const xrStore = createXRStore()
+
+type GazeZone = 'left' | 'centre' | 'right'
+type StagePhase = 'lobby' | 'active' | 'debrief'
 
 interface SeatTransform {
   x: number
@@ -75,7 +101,6 @@ function computeVenueSeats(venue: VenueType): SeatTransform[] {
     const y = 0.78 + row * config.rise
     const yaw = Math.atan2(-x, 2.2 - z) * 0.55
 
-    // Deterministic pseudo-random flags (40% distracted pool, 70% supportive nodders)
     const hash = (i * 2654435761) >>> 0
     const isDistracted = hash % 10 < 4
     const isNodder = hash % 10 < 7
@@ -92,6 +117,21 @@ function computeVenueSeats(venue: VenueType): SeatTransform[] {
   }
 
   return seats
+}
+
+function getSeatCount(venue: VenueType): number {
+  switch (venue) {
+    case 'interview_room':
+      return 1
+    case 'panel_room':
+      return 3
+    case 'classroom':
+      return 30
+    case 'lecture_hall':
+      return 60
+    case 'auditorium':
+      return 200
+  }
 }
 
 interface InstancedAudienceProps {
@@ -126,7 +166,6 @@ function InstancedAudience({
     [behaviour, seats],
   )
 
-  // Initial placement & per-frame subtle behaviour animation (frozen when paused)
   const applyTransforms = useCallback(
     (t: number) => {
       if (!bodyRef.current || !headRef.current) return
@@ -134,7 +173,6 @@ function InstancedAudience({
       for (let i = 0; i < count; i++) {
         const s = seats[i]
 
-        // Body posture
         let bodyLeanX = 0
         if (behaviour === 'challenging') {
           bodyLeanX = -0.09
@@ -147,7 +185,6 @@ function InstancedAudience({
         dummy.updateMatrix()
         bodyRef.current.setMatrixAt(i, dummy.matrix)
 
-        // Head animation driven by audience behaviour
         let headPitch = 0
         let headYaw = s.yaw
         let headRoll = 0
@@ -175,7 +212,6 @@ function InstancedAudience({
       bodyRef.current.instanceMatrix.needsUpdate = true
       headRef.current.instanceMatrix.needsUpdate = true
 
-      // Glowing phones for distracted audience members (30-50%)
       if (phoneRef.current && distractedIndices.length > 0) {
         for (let k = 0; k < distractedIndices.length; k++) {
           const s = seats[distractedIndices[k]]
@@ -188,11 +224,10 @@ function InstancedAudience({
         phoneRef.current.instanceMatrix.needsUpdate = true
       }
 
-      // Discrete raised hand cue
       if (handRef.current) {
         if (handRaisedIndex !== null && handRaisedIndex < count) {
           const s = seats[handRaisedIndex]
-          dummy.position.set(s.x + 0.32, s.y + 0.72 + Math.sin(t * 3) * 0.04, s.z + 0.08)
+          dummy.position.set(s.x + 0.32, s.y + 0.78 + Math.sin(t * 3.5) * 0.05, s.z + 0.08)
           dummy.rotation.set(0, 0, -0.15)
           dummy.scale.set(1, 1, 1)
         } else {
@@ -228,19 +263,16 @@ function InstancedAudience({
 
   return (
     <group>
-      {/* Torso instances */}
       <instancedMesh ref={bodyRef} args={[undefined, undefined, count]} frustumCulled={false}>
         <capsuleGeometry args={[0.22, 0.56, 4, 8]} />
         <meshStandardMaterial color={bodyColor} roughness={0.85} />
       </instancedMesh>
 
-      {/* Head instances */}
       <instancedMesh ref={headRef} args={[undefined, undefined, count]} frustumCulled={false}>
         <sphereGeometry args={[0.17, 10, 10]} />
         <meshStandardMaterial color="#cbd5e1" roughness={0.7} />
       </instancedMesh>
 
-      {/* Phone glow instances when distracted */}
       {distractedIndices.length > 0 && (
         <instancedMesh
           ref={phoneRef}
@@ -248,18 +280,13 @@ function InstancedAudience({
           frustumCulled={false}
         >
           <boxGeometry args={[0.12, 0.2, 0.02]} />
-          <meshStandardMaterial
-            color="#93c5fd"
-            emissive="#60a5fa"
-            emissiveIntensity={1.6}
-          />
+          <meshStandardMaterial color="#93c5fd" emissive="#60a5fa" emissiveIntensity={1.6} />
         </instancedMesh>
       )}
 
-      {/* Discrete raised hand indicator */}
       <instancedMesh ref={handRef} args={[undefined, undefined, 1]} frustumCulled={false}>
-        <capsuleGeometry args={[0.06, 0.34, 4, 6]} />
-        <meshStandardMaterial color="#f59e0b" emissive="#d97706" emissiveIntensity={0.4} />
+        <capsuleGeometry args={[0.07, 0.4, 4, 6]} />
+        <meshStandardMaterial color="#f59e0b" emissive="#d97706" emissiveIntensity={0.65} />
       </instancedMesh>
     </group>
   )
@@ -318,11 +345,9 @@ function useSlideCanvasTexture(
     ctx.fillStyle = isConfidence ? '#0f172a' : '#f8fafc'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-    // Top accent bar
     ctx.fillStyle = isConfidence ? '#0f766e' : '#1d4ed8'
     ctx.fillRect(0, 0, canvas.width, 14)
 
-    // Header metadata
     ctx.fillStyle = isConfidence ? '#94a3b8' : '#475569'
     ctx.font = 'bold 28px Inter, system-ui, sans-serif'
     const counter = `${isInterview ? 'Question' : 'Slide'} ${slideIndex + 1} / ${Math.max(1, totalSlides)}`
@@ -343,7 +368,6 @@ function useSlideCanvasTexture(
       ctx.textAlign = 'left'
     }
 
-    // Active topic headline
     ctx.fillStyle = isConfidence ? '#f8fafc' : '#0f172a'
     ctx.font = '800 54px Inter, system-ui, sans-serif'
     const headline = activeTopic?.title || sessionTitle
@@ -352,7 +376,6 @@ function useSlideCanvasTexture(
       ctx.fillText(line, 48, 170 + i * 68)
     })
 
-    // Brief badge
     if (activeTopic?.brief) {
       ctx.fillStyle = '#0f766e'
       ctx.fillRect(48, 385, 130, 42)
@@ -361,7 +384,6 @@ function useSlideCanvasTexture(
       ctx.fillText(briefLabel.toUpperCase(), 70, 414)
     }
 
-    // Next up cue on confidence screen
     if (isConfidence && nextTopic) {
       ctx.fillStyle = '#94a3b8'
       ctx.font = '600 26px Inter, system-ui, sans-serif'
@@ -394,7 +416,6 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
   if (venue === 'interview_room') {
     return (
       <group>
-        {/* Warm office floor & backdrop */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -2]}>
           <planeGeometry args={[12, 12]} />
           <meshStandardMaterial color="#27272a" roughness={0.9} />
@@ -403,7 +424,6 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
           <planeGeometry args={[10, 4.8]} />
           <meshStandardMaterial color="#1e293b" />
         </mesh>
-        {/* Executive interview desk */}
         <mesh position={[0, 0.72, -1.7]}>
           <boxGeometry args={[2.6, 0.08, 1.0]} />
           <meshStandardMaterial color="#78350f" roughness={0.6} />
@@ -416,7 +436,6 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
           <boxGeometry args={[0.1, 0.72, 0.85]} />
           <meshStandardMaterial color="#451a03" />
         </mesh>
-        {/* Interviewer laptop on desk */}
         <mesh position={[0.35, 0.78, -1.85]} rotation={[-0.2, 0.15, 0]}>
           <boxGeometry args={[0.36, 0.02, 0.24]} />
           <meshStandardMaterial color="#94a3b8" />
@@ -436,12 +455,10 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
           <planeGeometry args={[12, 5]} />
           <meshStandardMaterial color="#0f172a" />
         </mesh>
-        {/* Wide panel table */}
         <mesh position={[0, 0.72, -2.0]}>
           <boxGeometry args={[4.6, 0.1, 0.95]} />
           <meshStandardMaterial color="#334155" roughness={0.6} />
         </mesh>
-        {/* 3 Nameplates */}
         {[-1.4, 0, 1.4].map((x) => (
           <mesh key={x} position={[x, 0.82, -1.62]}>
             <boxGeometry args={[0.42, 0.12, 0.05]} />
@@ -459,13 +476,11 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
 
   return (
     <group>
-      {/* Main floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -floorDepth / 2 + 4]}>
         <planeGeometry args={[floorWidth, floorDepth]} />
         <meshStandardMaterial color={floorColor} roughness={0.92} />
       </mesh>
 
-      {/* Stage apron for auditorium & lecture hall */}
       {venue !== 'classroom' && (
         <mesh position={[0, 0.08, 1.3]}>
           <boxGeometry args={[venue === 'auditorium' ? 14 : 9, 0.16, 3.2]} />
@@ -473,13 +488,11 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
         </mesh>
       )}
 
-      {/* Presenter lectern */}
       <mesh position={[-1.1, 0.55, 1.15]}>
         <boxGeometry args={[0.62, 1.1, 0.45]} />
         <meshStandardMaterial color="#475569" roughness={0.7} />
       </mesh>
 
-      {/* Stepped risers for lecture hall & auditorium */}
       {(venue === 'lecture_hall' || venue === 'auditorium') &&
         Array.from({ length: venue === 'auditorium' ? 10 : 6 }, (_, row) => (
           <mesh
@@ -547,19 +560,15 @@ function XRTriggerBridge({
   return null
 }
 
-type GazeZone = 'left' | 'centre' | 'right'
-
-const MAX_DESKTOP_YAW = 1.15 // ~66 deg left/right across audience zones
-const MAX_DESKTOP_PITCH_UP = 0.45 // ~26 deg up toward projector
-const MAX_DESKTOP_PITCH_DOWN = -0.55 // ~32 deg down toward confidence screen
+const MAX_DESKTOP_YAW = 1.15
+const MAX_DESKTOP_PITCH_UP = 0.45
+const MAX_DESKTOP_PITCH_DOWN = -0.55
 
 function DesktopMouseLook({
   isPaused,
-  onGazeZoneChange,
   onXRPresentingChange,
 }: {
   isPaused: boolean
-  onGazeZoneChange: (zone: GazeZone) => void
   onXRPresentingChange: (presenting: boolean) => void
 }) {
   const { camera, gl } = useThree()
@@ -567,7 +576,6 @@ function DesktopMouseLook({
   const pitchRef = useRef(0)
   const draggingRef = useRef(false)
   const lastPosRef = useRef({ x: 0, y: 0 })
-  const lastZoneRef = useRef<GazeZone>('centre')
 
   useEffect(() => {
     const dom = gl.domElement
@@ -579,13 +587,6 @@ function DesktopMouseLook({
       camera.rotation.y = yawRef.current
       camera.rotation.x = pitchRef.current
       camera.rotation.z = 0
-
-      const nextZone: GazeZone =
-        yawRef.current > 0.28 ? 'left' : yawRef.current < -0.28 ? 'right' : 'centre'
-      if (nextZone !== lastZoneRef.current) {
-        lastZoneRef.current = nextZone
-        onGazeZoneChange(nextZone)
-      }
     }
 
     const onPointerDown = (e: PointerEvent) => {
@@ -596,7 +597,7 @@ function DesktopMouseLook({
       try {
         dom.setPointerCapture(e.pointerId)
       } catch {
-        // Ignore capture errors
+        // Ignore
       }
     }
 
@@ -666,21 +667,83 @@ function DesktopMouseLook({
       xr.removeEventListener('sessionstart', onSessionStart)
       xr.removeEventListener('sessionend', onSessionEnd)
     }
-  }, [camera, gl, isPaused, onGazeZoneChange, onXRPresentingChange])
+  }, [camera, gl, isPaused, onXRPresentingChange])
 
   return null
 }
 
+/**
+ * Head-Gaze Zone Tracker (FR-16): reads active camera world direction every frame
+ * (works identically with Quest 3 XR headset tracking and Desktop Mouse Look).
+ */
+function CameraGazeTracker({
+  isPaused,
+  dwellRef,
+  onZoneChange,
+}: {
+  isPaused: boolean
+  dwellRef: React.MutableRefObject<{ left: number; centre: number; right: number }>
+  onZoneChange: (zone: GazeZone) => void
+}) {
+  const { camera } = useThree()
+  const dirVec = useMemo(() => new THREE.Vector3(), [])
+  const lastZoneRef = useRef<GazeZone>('centre')
+
+  useFrame((_, delta) => {
+    if (isPaused) return
+    const dt = Math.min(delta, 0.1)
+    camera.getWorldDirection(dirVec)
+    // Looking toward -Z: negative x = audience left, positive x = audience right
+    const yawRad = Math.atan2(-dirVec.x, -dirVec.z)
+    const zone: GazeZone = yawRad > 0.25 ? 'left' : yawRad < -0.25 ? 'right' : 'centre'
+    dwellRef.current[zone] += dt
+
+    if (zone !== lastZoneRef.current) {
+      lastZoneRef.current = zone
+      onZoneChange(zone)
+    }
+  })
+
+  return null
+}
+
+function raiseDifficultySetup(current: SessionSetup): SessionSetup {
+  const behaviourOrder: AudienceBehaviour[] = [
+    'supportive',
+    'attentive',
+    'distracted',
+    'challenging',
+  ]
+  const interruptionOrder: InterruptionLevel[] = ['none', 'low', 'medium', 'high']
+  const nextBehaviourIdx = Math.min(
+    behaviourOrder.length - 1,
+    behaviourOrder.indexOf(current.audienceBehaviour) + 1,
+  )
+  const nextIntIdx = Math.min(
+    interruptionOrder.length - 1,
+    interruptionOrder.indexOf(current.interruptionLevel) + 1,
+  )
+  return {
+    ...current,
+    audienceBehaviour: behaviourOrder[nextBehaviourIdx],
+    interruptionLevel: interruptionOrder[nextIntIdx],
+    followUps: true,
+    coachedMode: false,
+  }
+}
+
 interface VRStageProps {
   setup: SessionSetup
+  userId?: string
   language?: AppLanguage
   captionsEnabled?: boolean
   onBackToPreFlight?: () => void
-  onEndSession?: () => void
+  onEndSession?: (record: SessionRecord) => void
 }
 
 export function VRStage({
-  setup,
+  setup: initialSetup,
+  userId = 'demo-user',
   language = 'en',
   captionsEnabled = true,
   onBackToPreFlight,
@@ -688,20 +751,21 @@ export function VRStage({
 }: VRStageProps) {
   const hudT = translations[language].vr.hud
 
+  const [activeSetup, setActiveSetup] = useState<SessionSetup>(initialSetup)
+  useEffect(() => {
+    setActiveSetup(initialSetup)
+  }, [initialSetup])
+
   const topics: Topic[] = useMemo(() => {
-    if (setup.topics.length > 0) return setup.topics
-    return [
-      {
-        id: 'default-topic-1',
-        title: setup.title,
-        brief: false,
-      },
-    ]
-  }, [setup.title, setup.topics])
+    if (activeSetup.topics.length > 0) return activeSetup.topics
+    return [{ id: 'default-topic-1', title: activeSetup.title, brief: false }]
+  }, [activeSetup.title, activeSetup.topics])
 
-  const totalLimitSeconds = Math.max(60, setup.timeLimitMinutes * 60)
+  const totalLimitSeconds = Math.max(60, activeSetup.timeLimitMinutes * 60)
+  const isInterview = activeSetup.practiceType === 'interview'
 
-  const [inLobby, setInLobby] = useState(true)
+  const [phase, setPhase] = useState<StagePhase>('lobby')
+  const [sessionId, setSessionId] = useState<string>(() => createSessionId())
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0)
   const [coveredIds, setCoveredIds] = useState<Set<string>>(() =>
     topics[0] ? new Set([topics[0].id]) : new Set(),
@@ -715,51 +779,276 @@ export function VRStage({
   const [gazeZone, setGazeZone] = useState<GazeZone>('centre')
   const [isXRPresenting, setIsXRPresenting] = useState(false)
 
-  const remainingSeconds = Math.max(0, totalLimitSeconds - elapsedSeconds)
-  const isInterview = setup.practiceType === 'interview'
+  // Speech delivery, Q&A, Auto-flagging & Debrief state
+  const analyzerRef = useRef<SpeechDeliveryAnalyzer>(new SpeechDeliveryAnalyzer())
+  const audioRecorderRef = useRef<OptionalAudioRecorder>(new OptionalAudioRecorder())
+  const gazeDwellRef = useRef<{ left: number; centre: number; right: number }>({
+    left: 0,
+    centre: 1,
+    right: 0,
+  })
+  const slideEnteredAtRef = useRef<number>(0)
+  const simSpeechIndexRef = useRef<number>(0)
+  const qaCountRef = useRef<number>(0)
 
-  // Session timer (freezes in lobby and when paused)
+  const [liveWpm, setLiveWpm] = useState(0)
+  const [liveFillers, setLiveFillers] = useState(0)
+  const [flaggedMoments, setFlaggedMoments] = useState<FlaggedMoment[]>([])
+  const [activeQuestion, setActiveQuestion] = useState<QAQuestion | null>(null)
+  const [answerSeconds, setAnswerSeconds] = useState(0)
+  const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string | null>(null)
+  const [completedRecord, setCompletedRecord] = useState<SessionRecord | null>(null)
+
+  const remainingSeconds = Math.max(0, totalLimitSeconds - elapsedSeconds)
+
+  const addFlag = useCallback(
+    (
+      momentType: FlaggedMomentType,
+      label: string,
+      opts?: { transcriptExcerpt?: string; aiTip?: string; slideIndex?: number },
+    ) => {
+      const flag: FlaggedMoment = {
+        id:
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `flag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+        timestampSeconds: elapsedSeconds,
+        momentType,
+        label,
+        transcriptExcerpt: opts?.transcriptExcerpt,
+        aiTip: opts?.aiTip,
+        slideIndex: opts?.slideIndex ?? currentSlideIndex,
+      }
+      setFlaggedMoments((prev) => [...prev, flag])
+    },
+    [currentSlideIndex, elapsedSeconds],
+  )
+
+  const computeGazeZones = useCallback((): GazeZones => {
+    const { left, centre, right } = gazeDwellRef.current
+    const total = Math.max(0.001, left + centre + right)
+    const leftPct = Math.round((left / total) * 100)
+    const rightPct = Math.round((right / total) * 100)
+    const centrePct = Math.max(0, 100 - leftPct - rightPct)
+    return { left: leftPct, centre: centrePct, right: rightPct }
+  }, [])
+
+  const snapshotCurrentRecord = useCallback((): SessionRecord => {
+    const speech = analyzerRef.current.getSnapshot(Math.max(1, elapsedSeconds))
+    return buildSessionRecord({
+      sessionId,
+      setup: activeSetup,
+      language,
+      durationSeconds: elapsedSeconds,
+      wpm: speech.overallWpm,
+      fillerCount: speech.fillerCount,
+      fillerBreakdown: speech.fillerBreakdown,
+      eyeContactZones: computeGazeZones(),
+      topicsCovered: coveredIds.size,
+      topicsTotal: topics.length,
+      iCount: speech.iCount,
+      weCount: speech.weCount,
+      hintUsed,
+      transcript: speech.transcript,
+      flaggedMoments,
+    })
+  }, [
+    activeSetup,
+    computeGazeZones,
+    coveredIds.size,
+    elapsedSeconds,
+    flaggedMoments,
+    hintUsed,
+    language,
+    sessionId,
+    topics.length,
+  ])
+
+  // Start optional audio recording when entering active stage; stop on exit/unmount
   useEffect(() => {
-    if (inLobby || isPaused) return
+    if (phase === 'active') {
+      void audioRecorderRef.current.start()
+    } else {
+      audioRecorderRef.current.stop()
+      stopTTS()
+    }
+    return () => {
+      audioRecorderRef.current.stop()
+      stopTTS()
+    }
+  }, [phase])
+
+  // Session timer & Q&A answer timer (freeze when paused or outside active phase)
+  useEffect(() => {
+    if (phase !== 'active' || isPaused) return
     const timer = window.setInterval(() => {
       setElapsedSeconds((prev) => prev + 1)
+      setAnswerSeconds((prev) => (activeQuestion ? prev + 1 : 0))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [inLobby, isPaused])
+  }, [activeQuestion, isPaused, phase])
 
-  // Discrete raised hand interruption cue when interruptionLevel !== 'none'
+  // 30-second auto-save to Supabase `sessions` & `flagged_moments` (localStorage fallback, FR-18, NFR-08)
   useEffect(() => {
-    if (inLobby || isPaused || setup.interruptionLevel === 'none') {
-      setHandRaisedIndex(null)
+    if (phase !== 'active' || isPaused || elapsedSeconds === 0 || elapsedSeconds % 30 !== 0) {
+      return
+    }
+    const record = snapshotCurrentRecord()
+    void saveSessionSnapshot(userId, record).then(() => {
+      const now = new Date()
+      setLastAutoSavedAt(
+        `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
+      )
+    })
+  }, [elapsedSeconds, isPaused, phase, snapshotCurrentRecord, userId])
+
+  const triggerQuestion = useCallback(() => {
+    const activeTopic = topics[currentSlideIndex]
+    const question = generateAudienceQuestion(
+      activeSetup,
+      activeTopic,
+      currentSlideIndex,
+      language,
+      qaCountRef.current,
+    )
+    qaCountRef.current += 1
+    const seatCount = getSeatCount(activeSetup.venue)
+    setHandRaisedIndex(Math.floor(seatCount * 0.25))
+    setActiveQuestion(question)
+    setAnswerSeconds(0)
+    setLiveCaption(`${question.speakerLabel}: “${question.text}”`)
+    speakQuestionTTS(question.text, language)
+    addFlag('question', `${question.speakerLabel}: ${question.topicTitle}`, {
+      transcriptExcerpt: question.text,
+      aiTip:
+        language === 'fr'
+          ? 'Répondez en moins de 45 secondes avec un exemple concret, puis revenez à votre diapositive.'
+          : 'Aim to answer in under 45 seconds with one concrete example, then bridge back to your slide.',
+      slideIndex: currentSlideIndex,
+    })
+  }, [activeSetup, addFlag, currentSlideIndex, language, topics])
+
+  // Automatic contextual Q&A interruptions at configured interruptionLevel rate
+  useEffect(() => {
+    if (
+      phase !== 'active' ||
+      isPaused ||
+      activeQuestion !== null ||
+      activeSetup.interruptionLevel === 'none'
+    ) {
       return
     }
     const intervalSec =
-      setup.interruptionLevel === 'high'
-        ? 18
-        : setup.interruptionLevel === 'medium'
-          ? 28
-          : 42
+      activeSetup.interruptionLevel === 'high'
+        ? 35
+        : activeSetup.interruptionLevel === 'medium'
+          ? 55
+          : 85
     if (elapsedSeconds > 0 && elapsedSeconds % intervalSec === 0) {
-      const seatCount =
-        setup.venue === 'interview_room'
-          ? 1
-          : setup.venue === 'panel_room'
-            ? 3
-            : setup.venue === 'classroom'
-              ? 30
-              : setup.venue === 'lecture_hall'
-                ? 60
-                : 200
-      setHandRaisedIndex(Math.floor(seatCount * 0.25))
-      setLiveCaption(hudT.captionHandRaised)
-    } else if (elapsedSeconds % intervalSec === 6) {
-      setHandRaisedIndex(null)
+      triggerQuestion()
     }
-  }, [elapsedSeconds, hudT.captionHandRaised, inLobby, isPaused, setup.interruptionLevel, setup.venue])
+  }, [activeQuestion, activeSetup.interruptionLevel, elapsedSeconds, isPaused, phase, triggerQuestion])
+
+  const handleIngestTranscript = useCallback(
+    (text: string) => {
+      const result = analyzerRef.current.ingestChunk(
+        text,
+        elapsedSeconds,
+        activeSetup.practiceType,
+      )
+      if (!result) return
+
+      setLiveWpm(result.snapshot.rollingWpm)
+      setLiveFillers(result.snapshot.fillerCount)
+      setLiveCaption(text)
+
+      if (result.detectedLongPause) {
+        addFlag(
+          'long_pause',
+          language === 'fr'
+            ? `Pause longue (${result.pauseDurationSeconds}s)`
+            : `Long pause (${result.pauseDurationSeconds}s)`,
+          {
+            transcriptExcerpt: text,
+            aiTip:
+              language === 'fr'
+                ? 'Utilisez une courte phrase de transition pour garder le fil.'
+                : 'Use a brief bridging phrase to keep momentum after a pause.',
+          },
+        )
+      }
+
+      if (result.detectedPaceSpike) {
+        addFlag(
+          'pace_spike',
+          language === 'fr'
+            ? `Accélération du débit (${result.snapshot.rollingWpm} m/min)`
+            : `Pace spike (${result.snapshot.rollingWpm} WPM)`,
+          {
+            transcriptExcerpt: text,
+            aiTip:
+              language === 'fr'
+                ? 'Ralentissez légèrement et marquez une respiration entre vos phrases.'
+                : 'Ease back toward 120–150 WPM by pausing briefly between key points.',
+          },
+        )
+      }
+
+      if (result.detectedWeOwnership) {
+        addFlag(
+          'we_ownership',
+          language === 'fr'
+            ? 'Formulation « nous » plutôt que « je »'
+            : 'Used “we” instead of “I” ownership',
+          {
+            transcriptExcerpt: text,
+            aiTip:
+              language === 'fr'
+                ? 'Précisez votre contribution personnelle avec « je ».'
+                : 'Clarify what YOU personally built or decided using “I” statements.',
+          },
+        )
+      }
+    },
+    [activeSetup.practiceType, addFlag, elapsedSeconds, language],
+  )
+
+  const handleSimulateSpeech = useCallback(() => {
+    const activeTopic = topics[currentSlideIndex]
+    const sample = getSimulatedSpeechSample(
+      activeSetup.practiceType,
+      activeTopic?.title ?? activeSetup.title,
+      simSpeechIndexRef.current,
+      language,
+    )
+    simSpeechIndexRef.current += 1
+    handleIngestTranscript(sample)
+  }, [activeSetup.practiceType, activeSetup.title, currentSlideIndex, handleIngestTranscript, language, topics])
 
   const goToSlide = useCallback(
     (nextIndex: number) => {
       const clamped = Math.max(0, Math.min(topics.length - 1, nextIndex))
+      if (clamped !== currentSlideIndex) {
+        const dwellOnPrev = elapsedSeconds - slideEnteredAtRef.current
+        if (dwellOnPrev < 2 && elapsedSeconds > 2) {
+          const prevTopic = topics[currentSlideIndex]
+          addFlag(
+            'skipped_slide',
+            language === 'fr'
+              ? `Diapo passée rapidement : ${prevTopic?.title ?? currentSlideIndex + 1}`
+              : `Quickly skipped slide: ${prevTopic?.title ?? currentSlideIndex + 1}`,
+            {
+              aiTip:
+                language === 'fr'
+                  ? 'Prenez quelques secondes pour résumer le point clé avant de changer de diapositive.'
+                  : 'Spend a few seconds summarizing the core takeaway before advancing.',
+              slideIndex: currentSlideIndex,
+            },
+          )
+        }
+        slideEnteredAtRef.current = elapsedSeconds
+      }
+
       setCurrentSlideIndex(clamped)
       const topic = topics[clamped]
       if (topic) {
@@ -771,7 +1060,7 @@ export function VRStage({
         })
       }
     },
-    [topics],
+    [addFlag, currentSlideIndex, elapsedSeconds, language, topics],
   )
 
   const handleNextSlide = useCallback(() => {
@@ -782,25 +1071,68 @@ export function VRStage({
     goToSlide(currentSlideIndex - 1)
   }, [currentSlideIndex, goToSlide])
 
-  const handleRestartCurrentSlide = () => {
-    setIsPaused(false)
+  const handleFinishAnswer = () => {
+    if (!activeQuestion) return
+    if (activeSetup.followUps && !activeQuestion.isFollowUp) {
+      const followUp = generateFollowUpQuestion(activeQuestion, activeSetup, language)
+      setActiveQuestion(followUp)
+      setAnswerSeconds(0)
+      setLiveCaption(`${followUp.speakerLabel}: “${followUp.text}”`)
+      speakQuestionTTS(followUp.text, language)
+    } else {
+      handleReturnToSlide()
+    }
+  }
+
+  const handleReturnToSlide = () => {
+    stopTTS()
+    setActiveQuestion(null)
+    setAnswerSeconds(0)
+    setHandRaisedIndex(null)
     setLiveCaption(hudT.captionReady)
   }
 
-  const handleRestartBeginning = () => {
-    setCurrentSlideIndex(0)
+  const resetSessionRun = (startSlide = 0, nextSetup?: SessionSetup) => {
+    if (nextSetup) setActiveSetup(nextSetup)
+    const targetTopics = (nextSetup?.topics.length ? nextSetup.topics : topics)
+    const safeSlide = Math.max(0, Math.min(targetTopics.length - 1, startSlide))
+    analyzerRef.current.reset()
+    gazeDwellRef.current = { left: 0, centre: 1, right: 0 }
+    slideEnteredAtRef.current = 0
+    simSpeechIndexRef.current = 0
+    qaCountRef.current = 0
+    setSessionId(createSessionId())
+    setCurrentSlideIndex(safeSlide)
+    setCoveredIds(targetTopics[safeSlide] ? new Set([targetTopics[safeSlide].id]) : new Set())
     setElapsedSeconds(0)
-    setCoveredIds(topics[0] ? new Set([topics[0].id]) : new Set())
+    setLiveWpm(0)
+    setLiveFillers(0)
+    setFlaggedMoments([])
+    setActiveQuestion(null)
+    setAnswerSeconds(0)
     setHandRaisedIndex(null)
+    setHintUsed(false)
+    setLastAutoSavedAt(null)
+    setCompletedRecord(null)
     setLiveCaption(hudT.captionReady)
     setIsPaused(false)
+    setPhase('active')
+  }
+
+  const handleEndSessionToDebrief = async () => {
+    stopTTS()
+    setIsPaused(false)
+    const finalRecord = snapshotCurrentRecord()
+    await saveSessionSnapshot(userId, finalRecord)
+    setCompletedRecord(finalRecord)
+    setPhase('debrief')
   }
 
   const activeTopic = topics[currentSlideIndex]
   const nextTopic = topics[currentSlideIndex + 1]
 
   const projectorTexture = useSlideCanvasTexture(
-    setup.title,
+    activeSetup.title,
     activeTopic,
     nextTopic,
     currentSlideIndex,
@@ -813,7 +1145,7 @@ export function VRStage({
   )
 
   const confidenceTexture = useSlideCanvasTexture(
-    setup.title,
+    activeSetup.title,
     activeTopic,
     nextTopic,
     currentSlideIndex,
@@ -825,13 +1157,32 @@ export function VRStage({
     hudT.nextUpLabel,
   )
 
-  if (inLobby) {
+  if (phase === 'lobby') {
     return (
       <VRLobbyCheck
-        setup={setup}
+        setup={activeSetup}
         language={language}
-        onEnterSession={() => setInLobby(false)}
+        onEnterSession={() => setPhase('active')}
         onBackToSetups={onBackToPreFlight}
+      />
+    )
+  }
+
+  if (phase === 'debrief' && completedRecord) {
+    return (
+      <VRQuickDebrief
+        record={completedRecord}
+        language={language}
+        onTryAgain={() => resetSessionRun(0)}
+        onRepeatMoment={(slideIdx) => resetSessionRun(slideIdx)}
+        onRaiseDifficulty={() => resetSessionRun(0, raiseDifficultySetup(activeSetup))}
+        onOpenFullReport={(record) => {
+          if (onEndSession) {
+            onEndSession(record)
+          } else if (onBackToPreFlight) {
+            onBackToPreFlight()
+          }
+        }}
       />
     )
   }
@@ -839,18 +1190,24 @@ export function VRStage({
   return (
     <div className="vr-stage-container">
       <PresenterHUD
-        setup={setup}
+        setup={activeSetup}
         language={language}
         topics={topics}
         currentSlideIndex={currentSlideIndex}
         coveredIds={coveredIds}
         elapsedSeconds={elapsedSeconds}
         remainingSeconds={remainingSeconds}
+        liveWpm={liveWpm}
+        liveFillers={liveFillers}
         panelVisible={panelVisible}
         isPaused={isPaused}
+        isXRPresenting={isXRPresenting}
         captionsEnabled={captionsEnabled}
         hintUsed={hintUsed}
         liveCaption={liveCaption}
+        lastAutoSavedAt={lastAutoSavedAt}
+        activeQuestion={activeQuestion}
+        answerSeconds={answerSeconds}
         onPrevSlide={handlePrevSlide}
         onNextSlide={handleNextSlide}
         onJumpToSlide={goToSlide}
@@ -858,28 +1215,43 @@ export function VRStage({
         onTogglePause={() => setIsPaused((prev) => !prev)}
         onEnterVR={() => xrStore.enterVR()}
         onVoiceFeedback={(msg) => setLiveCaption(msg)}
+        onSpeechTranscript={handleIngestTranscript}
+        onSimulateSpeech={handleSimulateSpeech}
+        onTriggerQuestion={triggerQuestion}
+        onFinishAnswer={handleFinishAnswer}
+        onReturnToSlide={handleReturnToSlide}
       />
 
       {isPaused && (
         <PauseMenu
           language={language}
-          coachedMode={setup.coachedMode}
-          currentTopicTitle={activeTopic?.title ?? setup.title}
+          coachedMode={activeSetup.coachedMode}
+          currentTopicTitle={activeTopic?.title ?? activeSetup.title}
           panelVisible={panelVisible}
           hintUsed={hintUsed}
           onResume={() => setIsPaused(false)}
-          onRestartCurrentSlide={handleRestartCurrentSlide}
-          onRestartBeginning={handleRestartBeginning}
-          onTogglePanel={() => setPanelVisible((prev) => !prev)}
-          onUseHint={() => setHintUsed(true)}
-          onEndSession={() => {
+          onRestartCurrentSlide={() => {
             setIsPaused(false)
-            if (onEndSession) {
-              onEndSession()
-            } else if (onBackToPreFlight) {
-              onBackToPreFlight()
-            }
+            setLiveCaption(hudT.captionReady)
           }}
+          onRestartBeginning={() => resetSessionRun(0)}
+          onTogglePanel={() => setPanelVisible((prev) => !prev)}
+          onUseHint={() => {
+            setHintUsed(true)
+            addFlag(
+              'hint_used',
+              language === 'fr'
+                ? `Indice PAR utilisé (${activeTopic?.title ?? activeSetup.title})`
+                : `PAR hint used (${activeTopic?.title ?? activeSetup.title})`,
+              {
+                aiTip:
+                  language === 'fr'
+                    ? 'Réessayez cette question en mode autonome pour comparer vos performances.'
+                    : 'Retry this question in Independent Mode to compare your delivery.',
+              },
+            )
+          }}
+          onEndSession={() => void handleEndSessionToDebrief()}
         />
       )}
 
@@ -907,8 +1279,12 @@ export function VRStage({
           />
           <DesktopMouseLook
             isPaused={isPaused}
-            onGazeZoneChange={setGazeZone}
             onXRPresentingChange={setIsXRPresenting}
+          />
+          <CameraGazeTracker
+            isPaused={isPaused}
+            dwellRef={gazeDwellRef}
+            onZoneChange={setGazeZone}
           />
 
           <color attach="background" args={['#0b1120']} />
@@ -916,21 +1292,21 @@ export function VRStage({
           <directionalLight position={[4, 8, 5]} intensity={1.1} />
           <pointLight position={[0, 4.2, -1]} intensity={0.6} color="#e0f2fe" />
 
-          <VenueArchitecture venue={setup.venue} />
+          <VenueArchitecture venue={activeSetup.venue} />
 
           {/* Main Virtual Projector Screen */}
           <mesh
             position={
-              setup.venue === 'interview_room' || setup.venue === 'panel_room'
+              activeSetup.venue === 'interview_room' || activeSetup.venue === 'panel_room'
                 ? [0, 2.35, -4.8]
                 : [0, 3.1, -2.6]
             }
           >
             <planeGeometry
               args={
-                setup.venue === 'auditorium'
+                activeSetup.venue === 'auditorium'
                   ? [4.6, 2.3]
-                  : setup.venue === 'interview_room'
+                  : activeSetup.venue === 'interview_room'
                     ? [2.6, 1.3]
                     : [3.4, 1.7]
               }
@@ -946,8 +1322,8 @@ export function VRStage({
 
           {/* Instanced audience / interviewer avatars (NFR-01: >=72 FPS up to 200 seats) */}
           <InstancedAudience
-            venue={setup.venue}
-            behaviour={setup.audienceBehaviour}
+            venue={activeSetup.venue}
+            behaviour={activeSetup.audienceBehaviour}
             isPaused={isPaused}
             handRaisedIndex={handRaisedIndex}
           />

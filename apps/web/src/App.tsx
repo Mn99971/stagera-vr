@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { CompanionFlow } from './companion/CompanionFlow'
 import { getStoredLanguage, setStoredLanguage } from './lib/auth'
 import { translations } from './lib/i18n'
-import type { AppLanguage, SessionSetup } from './types/stagera'
+import type { AppLanguage, SessionRecord, SessionSetup } from './types/stagera'
 import { VRPreFlight } from './vr/VRPreFlight'
 import { VRStage } from './vr/VRStage'
 
 export function App() {
   const [step, setStep] = useState<'setup' | 'vr' | 'report'>('setup')
   const [activeSetup, setActiveSetup] = useState<SessionSetup | null>(null)
+  const [lastRecord, setLastRecord] = useState<SessionRecord | null>(null)
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [language, setLanguage] = useState<AppLanguage>(() => getStoredLanguage())
 
@@ -71,7 +72,10 @@ export function App() {
                 language={language}
                 captionsEnabled={captionsEnabled}
                 onBackToPreFlight={() => setActiveSetup(null)}
-                onEndSession={() => setStep('report')}
+                onEndSession={(record) => {
+                  setLastRecord(record)
+                  setStep('report')
+                }}
               />
             ) : (
               <VRPreFlight
@@ -87,10 +91,12 @@ export function App() {
         {step === 'report' && (
           <section className="stage-card" aria-labelledby="report-heading">
             <h1 id="report-heading" className="screen-title">
-              {t.reportPlaceholderTitle}
+              {lastRecord ? lastRecord.title : t.reportPlaceholderTitle}
             </h1>
             <p className="screen-subtitle" style={{ marginBottom: 0 }}>
-              {t.reportPlaceholderDesc}
+              {lastRecord
+                ? `${lastRecord.wpm} WPM · ${lastRecord.fillerCount} fillers · ${lastRecord.topicsCovered}/${lastRecord.topicsTotal} topics · ${lastRecord.flaggedMoments.length} flagged moment(s)`
+                : t.reportPlaceholderDesc}
             </p>
           </section>
         )}
