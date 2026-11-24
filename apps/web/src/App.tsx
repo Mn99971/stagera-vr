@@ -71,6 +71,7 @@ export function App() {
                 language={language}
                 captionsEnabled={captionsEnabled}
                 onBackToPreFlight={() => setActiveSetup(null)}
+                onEndSession={() => setStep('report')}
               />
             ) : (
               <VRPreFlight

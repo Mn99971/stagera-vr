@@ -322,6 +322,79 @@ export interface Translations {
     startSessionCta: string
     changeSetupBtn: string
   }
+  vr: {
+    lobby: {
+      kicker: string
+      heading: string
+      subtitle: string
+      micTitle: string
+      micDesc: string
+      micTestBtn: string
+      micActive: string
+      micDenied: string
+      micFallbackNote: string
+      micLevelLabel: string
+      gazeTitle: string
+      gazeDesc: string
+      gazeLeft: string
+      gazeCentre: string
+      gazeRight: string
+      gazeReady: string
+      triggerTitle: string
+      triggerDesc: string
+      triggerPrev: string
+      triggerNext: string
+      triggerSampleSlide: string
+      triggerReady: string
+      enterSessionCta: string
+      skipChecksBtn: string
+      backToSetups: string
+    }
+    hud: {
+      slideCounter: string
+      questionCounter: string
+      prevSlide: string
+      nextSlide: string
+      voiceOn: string
+      voiceOff: string
+      voiceUnsupported: string
+      voiceHeardNext: string
+      voiceHeardPrev: string
+      panelShow: string
+      panelHide: string
+      pauseBtn: string
+      enterVrBtn: string
+      elapsedLabel: string
+      remainingLabel: string
+      topicsHeading: string
+      oneMinWarningBanner: string
+      timeUpBanner: string
+      briefTag: string
+      nextUpLabel: string
+      captionReady: string
+      captionHandRaised: string
+      hintUsedBadge: string
+    }
+    pause: {
+      heading: string
+      subtitle: string
+      resume: string
+      restartCurrent: string
+      restartBeginning: string
+      hidePanel: string
+      showPanel: string
+      endSession: string
+      giveHintBtn: string
+      hintTitle: string
+      hintTrackedNote: string
+      parProblemLabel: string
+      parActionLabel: string
+      parResultLabel: string
+      parProblemTip: string
+      parActionTip: string
+      parResultTip: string
+    }
+  }
 }
 
 export const translations: Record<AppLanguage, Translations> = {
@@ -736,6 +809,79 @@ export const translations: Record<AppLanguage, Translations> = {
       startSessionCta: 'Start session',
       changeSetupBtn: 'Change setup',
     },
+    vr: {
+      lobby: {
+        kicker: 'VR Lobby Check (S2.1)',
+        heading: 'Mic, gaze & trigger check',
+        subtitle: 'Verify your microphone, 3-point eye-contact zones, and slide trigger before stepping on stage.',
+        micTitle: '1. Microphone level',
+        micDesc: 'Speak a short sentence to confirm your mic is picking up audio.',
+        micTestBtn: 'Enable & test mic',
+        micActive: 'Mic active ✓',
+        micDenied: 'Microphone permission unavailable',
+        micFallbackNote: 'You can still rehearse in visual/controller mode without live mic input.',
+        micLevelLabel: 'Live input level',
+        gazeTitle: '2. 3-point head / gaze calibration',
+        gazeDesc: 'Look toward each zone and tap to calibrate Left, Centre, and Right eye-contact tracking.',
+        gazeLeft: 'Look Left',
+        gazeCentre: 'Look Centre',
+        gazeRight: 'Look Right',
+        gazeReady: 'All 3 gaze zones calibrated ✓',
+        triggerTitle: '3. Slide trigger test',
+        triggerDesc: 'Use the buttons below or Left/Right arrow keys to test advancing slides.',
+        triggerPrev: 'Previous',
+        triggerNext: 'Next',
+        triggerSampleSlide: 'Test slide {num} of 3',
+        triggerReady: 'Slide trigger verified ✓',
+        enterSessionCta: 'Enter VR session',
+        skipChecksBtn: 'Skip checks & start',
+        backToSetups: 'Back to setups',
+      },
+      hud: {
+        slideCounter: 'Slide {current} / {total}',
+        questionCounter: 'Question {current} / {total}',
+        prevSlide: 'Prev',
+        nextSlide: 'Next',
+        voiceOn: 'Voice: ON',
+        voiceOff: 'Voice: OFF',
+        voiceUnsupported: 'Voice N/A',
+        voiceHeardNext: 'Voice command: “next slide”',
+        voiceHeardPrev: 'Voice command: “previous slide”',
+        panelShow: 'Show panel (B)',
+        panelHide: 'Hide panel (B)',
+        pauseBtn: 'Pause (P)',
+        enterVrBtn: 'Enter VR (Quest 3)',
+        elapsedLabel: 'Elapsed',
+        remainingLabel: 'Remaining',
+        topicsHeading: 'Live outline',
+        oneMinWarningBanner: '1 minute remaining — start wrapping up.',
+        timeUpBanner: 'Time limit reached — conclude your closing point.',
+        briefTag: 'Brief',
+        nextUpLabel: 'Next up',
+        captionReady: 'Audience is settled and listening. Say “next slide” or use arrows to advance.',
+        captionHandRaised: 'An audience member raised a hand with a question.',
+        hintUsedBadge: 'PAR hint used',
+      },
+      pause: {
+        heading: 'Session paused',
+        subtitle: 'Timer and audience animations are frozen until you resume.',
+        resume: 'Resume session',
+        restartCurrent: 'Restart from current slide',
+        restartBeginning: 'Restart from beginning',
+        hidePanel: 'Hide private panel',
+        showPanel: 'Show private panel',
+        endSession: 'End session & view report',
+        giveHintBtn: 'Give me a hint (PAR)',
+        hintTitle: 'Coached PAR Prompt',
+        hintTrackedNote: 'Hint used — recorded separately for coached mode review.',
+        parProblemLabel: 'P — Problem',
+        parActionLabel: 'A — Action (use “I”)',
+        parResultLabel: 'R — Result',
+        parProblemTip: 'State the specific challenge or goal for “{topic}” in 1–2 sentences.',
+        parActionTip: 'Describe the concrete steps YOU personally took and why you chose that approach.',
+        parResultTip: 'Close with a measurable outcome, metric, or key lesson learned.',
+      },
+    },
   },
   fr: {
     app: {
@@ -1147,6 +1293,79 @@ export const translations: Record<AppLanguage, Translations> = {
       captionsDesc: 'Activés par défaut pour toutes les interventions du public et du recruteur.',
       startSessionCta: 'Démarrer la session',
       changeSetupBtn: 'Changer de configuration',
+    },
+    vr: {
+      lobby: {
+        kicker: 'Vérification VR (S2.1)',
+        heading: 'Micro, regard et déclencheur',
+        subtitle: 'Vérifiez votre microphone, vos 3 zones de contact visuel et le passage des diapositives avant de monter sur scène.',
+        micTitle: '1. Niveau du microphone',
+        micDesc: 'Prononcez une courte phrase pour vérifier la captation audio.',
+        micTestBtn: 'Activer et tester le micro',
+        micActive: 'Micro actif ✓',
+        micDenied: 'Accès au microphone indisponible',
+        micFallbackNote: 'Vous pouvez tout de même répéter en mode visuel / contrôleur sans micro.',
+        micLevelLabel: 'Niveau d’entrée en direct',
+        gazeTitle: '2. Calibration du regard (3 points)',
+        gazeDesc: 'Regardez chaque zone et touchez-la pour calibrer Gauche, Centre et Droite.',
+        gazeLeft: 'Regarder à gauche',
+        gazeCentre: 'Regarder au centre',
+        gazeRight: 'Regarder à droite',
+        gazeReady: 'Les 3 zones de regard sont calibrées ✓',
+        triggerTitle: '3. Test du passage de diapositives',
+        triggerDesc: 'Utilisez les boutons ci-dessous ou les flèches Gauche/Droite pour tester le défilement.',
+        triggerPrev: 'Précédente',
+        triggerNext: 'Suivante',
+        triggerSampleSlide: 'Diapositive test {num} sur 3',
+        triggerReady: 'Déclencheur vérifié ✓',
+        enterSessionCta: 'Entrer dans la session VR',
+        skipChecksBtn: 'Passer et démarrer',
+        backToSetups: 'Retour aux configurations',
+      },
+      hud: {
+        slideCounter: 'Diapo {current} / {total}',
+        questionCounter: 'Question {current} / {total}',
+        prevSlide: 'Préc.',
+        nextSlide: 'Suiv.',
+        voiceOn: 'Voix : ON',
+        voiceOff: 'Voix : OFF',
+        voiceUnsupported: 'Voix N/D',
+        voiceHeardNext: 'Commande vocale : « diapositive suivante »',
+        voiceHeardPrev: 'Commande vocale : « diapositive précédente »',
+        panelShow: 'Afficher panneau (B)',
+        panelHide: 'Masquer panneau (B)',
+        pauseBtn: 'Pause (P)',
+        enterVrBtn: 'Entrer en VR (Quest 3)',
+        elapsedLabel: 'Écoulé',
+        remainingLabel: 'Restant',
+        topicsHeading: 'Plan en direct',
+        oneMinWarningBanner: '1 minute restante — préparez votre conclusion.',
+        timeUpBanner: 'Temps écoulé — terminez votre message final.',
+        briefTag: 'Bref',
+        nextUpLabel: 'À suivre',
+        captionReady: 'Le public est installé et écoute. Dites « next slide » ou utilisez les flèches.',
+        captionHandRaised: 'Un membre du public a levé la main pour poser une question.',
+        hintUsedBadge: 'Indice PAR utilisé',
+      },
+      pause: {
+        heading: 'Session en pause',
+        subtitle: 'Le chronomètre et l’audience sont figés jusqu’à la reprise.',
+        resume: 'Reprendre la session',
+        restartCurrent: 'Recommencer depuis la diapo actuelle',
+        restartBeginning: 'Recommencer depuis le début',
+        hidePanel: 'Masquer le panneau privé',
+        showPanel: 'Afficher le panneau privé',
+        endSession: 'Terminer et voir le rapport',
+        giveHintBtn: 'Donner un indice (PAR)',
+        hintTitle: 'Indice coaché (PAR)',
+        hintTrackedNote: 'Indice utilisé — suivi séparément pour le mode coaché.',
+        parProblemLabel: 'P — Problème',
+        parActionLabel: 'A — Action (utilisez « je »)',
+        parResultLabel: 'R — Résultat',
+        parProblemTip: 'Présentez l’enjeu ou l’objectif de « {topic} » en 1 à 2 phrases.',
+        parActionTip: 'Décrivez les actions concrètes que VOUS avez menées et votre raisonnement.',
+        parResultTip: 'Concluez avec un résultat mesurable, un chiffre ou un enseignement clé.',
+      },
     },
   },
 }

@@ -2018,8 +2018,499 @@ select:focus-visible {
   pointer-events: auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
+
+/* S2.1 VR Lobby: Mic, Gaze & Trigger Check */
+.vr-lobby-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.vr-lobby-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.vr-lobby-setup-pill {
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vr-lobby-setup-pill strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.vr-lobby-setup-pill span {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.vr-lobby-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 820px) {
+  .vr-lobby-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vr-lobby-card {
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.mic-meter-wrap {
+  margin-top: 12px;
+}
+
+.mic-meter-track {
+  width: 100%;
+  height: 14px;
+  background: var(--border-default);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mic-meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-teal), var(--accent-primary));
+  border-radius: 999px;
+  transition: width 0.08s linear;
+}
+
+.vr-lobby-fallback {
+  margin-top: 10px;
+  background: var(--bg-banner);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: #1e3a8a;
+}
+
+.vr-lobby-fallback p {
+  margin: 3px 0 0;
+  color: #1e40af;
+}
+
+.gaze-targets-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.gaze-target-btn {
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 12px 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.gaze-target-btn:hover {
+  border-color: var(--accent-primary);
+  background: var(--bg-banner);
+}
+
+.gaze-target-btn.calibrated {
+  border-color: var(--accent-teal);
+  background: var(--accent-teal-soft);
+  color: #115e59;
+}
+
+.gaze-dot {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.trigger-test-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trigger-slide-preview {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.trigger-test-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vr-lobby-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.vr-lobby-footer-left,
+.vr-lobby-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Step 2 Active VR Stage Container & Presenter HUD */
+.vr-stage-container {
+  position: relative;
+  width: 100%;
+  height: 74vh;
+  min-height: 540px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0b1120;
+}
+
+.vr-hud-btn {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(15, 23, 42, 0.86);
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.vr-hud-btn:hover:not(:disabled) {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.vr-hud-btn.active {
+  background: var(--accent-teal);
+  border-color: #5eead4;
+  color: #ffffff;
+}
+
+.vr-hud-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vr-warning-banner {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  background: #f59e0b;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 10px 18px;
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.vr-warning-banner.danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+/* Toggleable Private Presenter Panel (NFR-10 readable large typography) */
+.vr-private-panel {
+  position: absolute;
+  left: 16px;
+  bottom: 72px;
+  z-index: 14;
+  width: 320px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 160px);
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1.5px solid rgba(148, 163, 184, 0.4);
+  border-radius: 16px;
+  padding: 16px;
+  color: #f8fafc;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.vr-private-timers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.vr-timer-block {
+  background: rgba(30, 41, 59, 0.85);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.vr-timer-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #cbd5e1;
+}
+
+.vr-timer-big {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: #f8fafc;
+}
+
+.vr-timer-big.warn {
+  color: #fbbf24;
+}
+
+.vr-timer-big.danger {
+  color: #f87171;
+}
+
+.vr-private-slide-badge {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  color: #93c5fd;
+  margin-bottom: 10px;
+}
+
+.vr-topic-checklist {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vr-topic-item {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(30, 41, 59, 0.7);
+  color: #e2e8f0;
+  border-radius: 9px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vr-topic-item.current {
+  border-color: #38bdf8;
+  background: rgba(29, 78, 216, 0.45);
+  color: #ffffff;
+}
+
+.vr-topic-tick {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.25);
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.vr-topic-item.covered .vr-topic-tick {
+  background: var(--accent-teal);
+  color: #ffffff;
+}
+
+.vr-topic-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.vr-brief-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgba(15, 118, 110, 0.35);
+  color: #99f6e4;
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+
+.vr-captions-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 14;
+  max-width: min(720px, calc(100% - 32px));
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  backdrop-filter: blur(8px);
+}
+
+/* S2.5 / S2.5b Pause Menu & Coached PAR Hint */
+.vr-pause-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.vr-pause-card {
+  width: 100%;
+  max-width: 440px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.vr-pause-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+}
+
+.vr-pause-subtitle {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  margin: 0 0 18px;
+}
+
+.vr-pause-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-hint {
+  width: 100%;
+  border: 1.5px solid var(--accent-teal);
+  background: var(--accent-teal-soft);
+  color: #115e59;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn-hint:hover {
+  background: #99f6e4;
+}
+
+.btn-danger-outline {
+  width: 100%;
+  border: 1.5px solid var(--danger);
+  background: var(--bg-surface);
+  color: var(--danger);
+  font-size: 15px;
+  font-weight: 700;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn-danger-outline:hover {
+  background: var(--danger-soft);
+}
+
+.vr-par-hint-card {
+  background: var(--bg-app);
+  border: 1.5px solid var(--accent-teal);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.vr-par-hint-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.vr-par-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vr-par-list dt {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--accent-teal);
+}
+
+.vr-par-list dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
 
 
 
