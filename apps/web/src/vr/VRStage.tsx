@@ -547,6 +547,130 @@ function XRTriggerBridge({
   return null
 }
 
+type GazeZone = 'left' | 'centre' | 'right'
+
+const MAX_DESKTOP_YAW = 1.15 // ~66 deg left/right across audience zones
+const MAX_DESKTOP_PITCH_UP = 0.45 // ~26 deg up toward projector
+const MAX_DESKTOP_PITCH_DOWN = -0.55 // ~32 deg down toward confidence screen
+
+function DesktopMouseLook({
+  isPaused,
+  onGazeZoneChange,
+  onXRPresentingChange,
+}: {
+  isPaused: boolean
+  onGazeZoneChange: (zone: GazeZone) => void
+  onXRPresentingChange: (presenting: boolean) => void
+}) {
+  const { camera, gl } = useThree()
+  const yawRef = useRef(0)
+  const pitchRef = useRef(0)
+  const draggingRef = useRef(false)
+  const lastPosRef = useRef({ x: 0, y: 0 })
+  const lastZoneRef = useRef<GazeZone>('centre')
+
+  useEffect(() => {
+    const dom = gl.domElement
+    const xr = gl.xr
+
+    const syncRotation = () => {
+      if (xr.isPresenting) return
+      camera.rotation.order = 'YXZ'
+      camera.rotation.y = yawRef.current
+      camera.rotation.x = pitchRef.current
+      camera.rotation.z = 0
+
+      const nextZone: GazeZone =
+        yawRef.current > 0.28 ? 'left' : yawRef.current < -0.28 ? 'right' : 'centre'
+      if (nextZone !== lastZoneRef.current) {
+        lastZoneRef.current = nextZone
+        onGazeZoneChange(nextZone)
+      }
+    }
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (xr.isPresenting || isPaused || e.button !== 0) return
+      draggingRef.current = true
+      lastPosRef.current = { x: e.clientX, y: e.clientY }
+      dom.style.cursor = 'grabbing'
+      try {
+        dom.setPointerCapture(e.pointerId)
+      } catch {
+        // Ignore capture errors
+      }
+    }
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!draggingRef.current || xr.isPresenting || isPaused) return
+      const dx = e.clientX - lastPosRef.current.x
+      const dy = e.clientY - lastPosRef.current.y
+      lastPosRef.current = { x: e.clientX, y: e.clientY }
+
+      yawRef.current = Math.max(
+        -MAX_DESKTOP_YAW,
+        Math.min(MAX_DESKTOP_YAW, yawRef.current + dx * 0.0045),
+      )
+      pitchRef.current = Math.max(
+        MAX_DESKTOP_PITCH_DOWN,
+        Math.min(MAX_DESKTOP_PITCH_UP, pitchRef.current + dy * 0.0038),
+      )
+      syncRotation()
+    }
+
+    const endDrag = (e: PointerEvent) => {
+      if (!draggingRef.current) return
+      draggingRef.current = false
+      dom.style.cursor = 'grab'
+      try {
+        dom.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore
+      }
+    }
+
+    const onDoubleClick = () => {
+      if (xr.isPresenting || isPaused) return
+      yawRef.current = 0
+      pitchRef.current = 0
+      syncRotation()
+    }
+
+    const onSessionStart = () => {
+      draggingRef.current = false
+      dom.style.cursor = 'default'
+      onXRPresentingChange(true)
+    }
+
+    const onSessionEnd = () => {
+      dom.style.cursor = 'grab'
+      onXRPresentingChange(false)
+      syncRotation()
+    }
+
+    dom.style.cursor = xr.isPresenting ? 'default' : 'grab'
+    dom.addEventListener('pointerdown', onPointerDown)
+    dom.addEventListener('pointermove', onPointerMove)
+    dom.addEventListener('pointerup', endDrag)
+    dom.addEventListener('pointercancel', endDrag)
+    dom.addEventListener('dblclick', onDoubleClick)
+    xr.addEventListener('sessionstart', onSessionStart)
+    xr.addEventListener('sessionend', onSessionEnd)
+
+    return () => {
+      dom.style.cursor = 'default'
+      dom.removeEventListener('pointerdown', onPointerDown)
+      dom.removeEventListener('pointermove', onPointerMove)
+      dom.removeEventListener('pointerup', endDrag)
+      dom.removeEventListener('pointercancel', endDrag)
+      dom.removeEventListener('dblclick', onDoubleClick)
+      xr.removeEventListener('sessionstart', onSessionStart)
+      xr.removeEventListener('sessionend', onSessionEnd)
+    }
+  }, [camera, gl, isPaused, onGazeZoneChange, onXRPresentingChange])
+
+  return null
+}
+
 interface VRStageProps {
   setup: SessionSetup
   language?: AppLanguage
@@ -588,6 +712,8 @@ export function VRStage({
   const [hintUsed, setHintUsed] = useState(false)
   const [liveCaption, setLiveCaption] = useState(hudT.captionReady)
   const [handRaisedIndex, setHandRaisedIndex] = useState<number | null>(null)
+  const [gazeZone, setGazeZone] = useState<GazeZone>('centre')
+  const [isXRPresenting, setIsXRPresenting] = useState(false)
 
   const remainingSeconds = Math.max(0, totalLimitSeconds - elapsedSeconds)
   const isInterview = setup.practiceType === 'interview'
@@ -757,13 +883,32 @@ export function VRStage({
         />
       )}
 
-      {/* Stationary camera at presenter eye height — zero artificial camera movement (NFR-05) */}
+      {!isXRPresenting && (
+        <div id="vr-simulator-hint-bar" className="vr-simulator-bar" aria-live="polite">
+          <span className="vr-simulator-gaze-pill">
+            {hudT.gazeZoneLabel}:{' '}
+            {gazeZone === 'left'
+              ? hudT.gazeZoneLeft
+              : gazeZone === 'right'
+                ? hudT.gazeZoneRight
+                : hudT.gazeZoneCentre}
+          </span>
+          <span className="vr-simulator-hint-text">{hudT.simulatorHint}</span>
+        </div>
+      )}
+
+      {/* Stationary camera at presenter eye height — zero artificial camera movement in XR (NFR-05) */}
       <Canvas camera={{ position: [0, 1.65, 2.2], fov: 65 }} dpr={[1, 1.5]}>
         <XR store={xrStore}>
           <XRTriggerBridge
             isPaused={isPaused}
             onPrevSlide={handlePrevSlide}
             onNextSlide={handleNextSlide}
+          />
+          <DesktopMouseLook
+            isPaused={isPaused}
+            onGazeZoneChange={setGazeZone}
+            onXRPresentingChange={setIsXRPresenting}
           />
 
           <color attach="background" args={['#0b1120']} />

@@ -374,6 +374,11 @@ export interface Translations {
       captionReady: string
       captionHandRaised: string
       hintUsedBadge: string
+      simulatorHint: string
+      gazeZoneLabel: string
+      gazeZoneLeft: string
+      gazeZoneCentre: string
+      gazeZoneRight: string
     }
     pause: {
       heading: string
@@ -861,6 +866,11 @@ export const translations: Record<AppLanguage, Translations> = {
         captionReady: 'Audience is settled and listening. Say “next slide” or use arrows to advance.',
         captionHandRaised: 'An audience member raised a hand with a question.',
         hintUsedBadge: 'PAR hint used',
+        simulatorHint: 'Drag: Look around | ←/→: Slides | B: Panel | Esc: Pause',
+        gazeZoneLabel: 'Gaze',
+        gazeZoneLeft: 'Left',
+        gazeZoneCentre: 'Centre',
+        gazeZoneRight: 'Right',
       },
       pause: {
         heading: 'Session paused',
@@ -1346,6 +1356,11 @@ export const translations: Record<AppLanguage, Translations> = {
         captionReady: 'Le public est installé et écoute. Dites « next slide » ou utilisez les flèches.',
         captionHandRaised: 'Un membre du public a levé la main pour poser une question.',
         hintUsedBadge: 'Indice PAR utilisé',
+        simulatorHint: 'Glisser : Regarder autour | ←/→ : Diapos | B : Panneau | Échap : Pause',
+        gazeZoneLabel: 'Regard',
+        gazeZoneLeft: 'Gauche',
+        gazeZoneCentre: 'Centre',
+        gazeZoneRight: 'Droite',
       },
       pause: {
         heading: 'Session en pause',
