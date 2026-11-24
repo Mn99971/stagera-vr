@@ -6,7 +6,6 @@ import type {
   SessionSetup,
   SessionSummary,
   UserProfile,
-  VenueType,
   WeeklyStats,
 } from '../types/stagera'
 import { LanguageToggle } from './LanguageToggle'
@@ -21,7 +20,7 @@ interface HomeDashboardProps {
   onUpdateProfile: (profile: UserProfile) => Promise<void>
   onEditProfile: () => void
   onStartNewSession: () => void
-  onLaunchVR: (venue: VenueType) => void
+  onLaunchVR: (setup: SessionSetup) => void
   onOpenReport: () => void
   onSignOut: () => void
 }
@@ -135,7 +134,7 @@ export function HomeDashboard({
                     <button
                       type="button"
                       className="btn-small"
-                      onClick={() => onLaunchVR(setup.venue)}
+                      onClick={() => onLaunchVR(setup)}
                     >
                       {t.launchVr}
                     </button>

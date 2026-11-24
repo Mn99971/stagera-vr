@@ -17,9 +17,9 @@ import type {
   CompanionScreen,
   SessionSetup,
   UserProfile,
-  VenueType,
 } from '../types/stagera'
 import { AuthScreen } from './AuthScreen'
+import { ConnectHeadsetScreen } from './ConnectHeadsetScreen'
 import { HomeDashboard } from './HomeDashboard'
 import { ProfileSetupScreen } from './ProfileSetupScreen'
 import { SessionWizard } from './SessionWizard'
@@ -28,7 +28,7 @@ import { WelcomeScreen } from './WelcomeScreen'
 interface CompanionFlowProps {
   language: AppLanguage
   onLanguageChange: (lang: AppLanguage) => void
-  onLaunchVR: (venue: VenueType) => void
+  onLaunchVR: (setup: SessionSetup) => void
   onOpenReport: () => void
 }
 
@@ -60,6 +60,7 @@ export function CompanionFlow({
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [editingProfile, setEditingProfile] = useState(false)
   const [savedSetups, setSavedSetups] = useState<SessionSetup[]>(STARTER_SAVED_SETUPS)
+  const [pairingSetup, setPairingSetup] = useState<SessionSetup | null>(null)
 
   useEffect(() => {
     let active = true
@@ -132,6 +133,7 @@ export function CompanionFlow({
     await signOutUser()
     setProfile(null)
     setEditingProfile(false)
+    setPairingSetup(null)
     setScreen('welcome')
   }
 
@@ -194,7 +196,10 @@ export function CompanionFlow({
             setScreen('profile_setup')
           }}
           onStartNewSession={() => setScreen('new_session')}
-          onLaunchVR={onLaunchVR}
+          onLaunchVR={(setup) => {
+            setPairingSetup(setup)
+            setScreen('connect_headset')
+          }}
           onOpenReport={onOpenReport}
           onSignOut={() => void handleSignOut()}
         />
@@ -206,14 +211,27 @@ export function CompanionFlow({
           profile={profile}
           onLanguageChange={handleLanguageChange}
           onCancel={() => setScreen('home')}
-          onCompleteSetup={async (setup, launchImmediately) => {
+          onCompleteSetup={async (setup, sendToHeadset) => {
             const saved = await persistSavedSetup(profile.id, setup)
             setSavedSetups((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)])
-            setScreen('home')
-            if (launchImmediately) {
-              onLaunchVR(saved.venue)
+            if (sendToHeadset) {
+              setPairingSetup(saved)
+              setScreen('connect_headset')
+            } else {
+              setScreen('home')
             }
           }}
+        />
+      )}
+
+      {screen === 'connect_headset' && profile && pairingSetup && (
+        <ConnectHeadsetScreen
+          language={language}
+          userId={profile.id}
+          setup={pairingSetup}
+          onLanguageChange={handleLanguageChange}
+          onBack={() => setScreen('home')}
+          onLaunchLocalVR={(setup) => onLaunchVR(setup)}
         />
       )}
     </div>

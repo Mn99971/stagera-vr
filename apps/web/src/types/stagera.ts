@@ -4,7 +4,13 @@ export type AudienceBehaviour = 'supportive' | 'attentive' | 'distracted' | 'cha
 export type InterruptionLevel = 'none' | 'low' | 'medium' | 'high'
 export type AppLanguage = 'en' | 'fr'
 export type UserRole = 'student' | 'lecturer' | 'job_seeker' | 'professional'
-export type CompanionScreen = 'welcome' | 'auth' | 'profile_setup' | 'home' | 'new_session'
+export type CompanionScreen =
+  | 'welcome'
+  | 'auth'
+  | 'profile_setup'
+  | 'home'
+  | 'new_session'
+  | 'connect_headset'
 export type AuthMode = 'signup' | 'login'
 export type DashboardTab = 'home' | 'history' | 'progress' | 'settings'
 

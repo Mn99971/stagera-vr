@@ -1683,4 +1683,343 @@ select:focus-visible {
   flex-shrink: 0;
 }
 
+/* S1.10 Connect Headset & Pairing */
+.pairing-code-card {
+  background: var(--bg-app);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 18px 16px;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.pairing-code-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.pairing-digits {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.pairing-digit {
+  width: 54px;
+  height: 64px;
+  border-radius: 12px;
+  background: var(--bg-surface);
+  border: 2px solid var(--accent-primary);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 32px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.pairing-digit.expired {
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+  opacity: 0.65;
+}
+
+.pairing-timer-row {
+  margin-bottom: 12px;
+}
+
+.pairing-expiry-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pairing-expiry-text.expired {
+  color: var(--danger);
+}
+
+.pairing-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pairing-status-pill.waiting {
+  background: var(--bg-banner);
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.pairing-status-pill.connected {
+  background: var(--accent-teal-soft);
+  color: #115e59;
+  border: 1px solid #99f6e4;
+}
+
+.pairing-status-pill.expired {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid #fecaca;
+}
+
+.pairing-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pairing-status-dot.waiting {
+  background: var(--accent-primary);
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+
+.pairing-status-dot.connected {
+  background: var(--accent-teal);
+}
+
+.pairing-status-dot.expired {
+  background: var(--danger);
+}
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+.pairing-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pairing-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.checklist-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--accent-teal-soft);
+  color: var(--accent-teal);
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* S2.0 VR Pre-Flight & Saved Setups */
+.preflight-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.preflight-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 780px) {
+  .preflight-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.preflight-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.preflight-card {
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 18px;
+}
+
+.preflight-preview-card {
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border-strong);
+}
+
+.preflight-pair-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.preflight-code-input {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.35em;
+  text-align: center;
+  padding: 10px 14px;
+}
+
+.preflight-success-banner {
+  margin-top: 10px;
+  background: var(--accent-teal-soft);
+  color: #115e59;
+  border: 1px solid #99f6e4;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.preflight-setup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preflight-setup-item {
+  width: 100%;
+  text-align: left;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.preflight-setup-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
+}
+
+.preflight-setup-item.selected {
+  border-color: var(--accent-primary);
+  background: var(--bg-banner);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+.preflight-setup-title {
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.preflight-selected-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 6px;
+  color: var(--text-primary);
+}
+
+.preflight-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0;
+}
+
+.preflight-meta-item {
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.preflight-meta-item dt {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.preflight-meta-item dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* VR Stage Overlay Bar */
+.vr-stage-overlay-bar {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.vr-stage-meta {
+  pointer-events: auto;
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  padding: 8px 14px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  backdrop-filter: blur(8px);
+}
+
+.vr-stage-meta strong {
+  font-size: 14px;
+}
+
+.vr-stage-meta span {
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.vr-stage-actions {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
 
