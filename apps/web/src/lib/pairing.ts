@@ -283,3 +283,89 @@ export async function claimPairingCode(rawCode: string): Promise<ClaimPairingRes
 
   return { ok: false, reason: 'not_found' }
 }
+
+/**
+ * Generates a fresh 4-digit pairing code for the in-headset 3D VR Lobby.
+ */
+export function generateHeadsetLobbyCode(): string {
+  return generateFourDigitCode()
+}
+
+/**
+ * Subscribes a VR headset sitting in the 3D Floating Lobby to incoming phone
+ * session launches over Supabase Realtime Broadcast (`pairing:<code>`) and
+ * same-origin BroadcastChannel fallback. When a phone sends a session payload,
+ * immediately invokes `onSessionReceived(setup)` to drop straight into the venue.
+ */
+export function subscribeHeadsetLobbyPairing(
+  code: string,
+  onSessionReceived: (setup: SessionSetup) => void,
+): () => void {
+  let received = false
+
+  const deliver = (setup: SessionSetup | undefined) => {
+    if (received || !setup) return
+    received = true
+    onSessionReceived(setup)
+  }
+
+  // 1. Same-origin BroadcastChannel fallback
+  const bc = createBroadcastChannel(code)
+  if (bc) {
+    bc.onmessage = (event: MessageEvent<PairingBroadcastMessage>) => {
+      const msg = event.data
+      if (msg?.type === 'session_payload' && msg.code === code) {
+        bc.postMessage({ type: 'headset_ack', code } satisfies PairingBroadcastMessage)
+        deliver(msg.setup)
+      }
+    }
+    bc.postMessage({ type: 'headset_join', code } satisfies PairingBroadcastMessage)
+  }
+
+  // 2. Supabase Realtime Broadcast (`pairing:<code>`)
+  const rtChannel = supabase
+    ? supabase
+        .channel(`pairing:${code}`, { config: { broadcast: { self: false } } })
+        .on('broadcast', { event: 'session_payload' }, (payload) => {
+          const setup = (payload.payload as { setup?: SessionSetup } | undefined)?.setup
+          if (setup) {
+            void rtChannel?.send({
+              type: 'broadcast',
+              event: 'headset_ack',
+              payload: { code },
+            })
+            deliver(setup)
+          }
+        })
+        .on('broadcast', { event: 'launch_venue' }, (payload) => {
+          const setup = (payload.payload as { setup?: SessionSetup } | undefined)?.setup
+          if (setup) {
+            void rtChannel?.send({
+              type: 'broadcast',
+              event: 'headset_ack',
+              payload: { code },
+            })
+            deliver(setup)
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            void rtChannel?.send({
+              type: 'broadcast',
+              event: 'headset_join',
+              payload: { code },
+            })
+          }
+        })
+    : null
+
+  return () => {
+    if (bc) {
+      bc.close()
+    }
+    if (supabase && rtChannel) {
+      void supabase.removeChannel(rtChannel)
+    }
+  }
+}
+

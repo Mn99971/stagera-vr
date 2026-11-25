@@ -3550,3 +3550,109 @@ select:focus-visible {
 .vr-preflight-cta:hover {
   filter: brightness(1.05);
 }
+
+/* ==========================================================================
+   VR Headset Direct Boot — Full-Viewport Dark 1-Tap Splash (Zero Flat UI)
+   ========================================================================== */
+
+.stagera-headset-root {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #090d16;
+  overflow: hidden;
+}
+
+.vr-stage-headset-full {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  border-radius: 0 !important;
+}
+
+.vr-headset-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 42%, rgba(20, 184, 166, 0.14) 0%, #090d16 62%);
+  color: #f8fafc;
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+  padding: 32px;
+}
+
+.vr-headset-splash-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 560px;
+}
+
+.vr-headset-splash-mark {
+  width: 68px;
+  height: 68px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #2563eb 0%, #0d9488 100%);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 800;
+  box-shadow: 0 14px 40px rgba(37, 99, 235, 0.45);
+}
+
+.vr-headset-splash-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+
+.vr-headset-splash-prompt {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #94a3b8;
+  padding: 12px 24px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 28px rgba(56, 189, 248, 0.18);
+}
+
+.vr-headset-splash-notice {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: #5eead4;
+}
+
+.vr-headset-escape-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 55;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.65);
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.vr-headset-escape-btn:hover {
+  color: #f8fafc;
+  border-color: rgba(148, 163, 184, 0.55);
+}
