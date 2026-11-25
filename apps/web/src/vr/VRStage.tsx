@@ -5,8 +5,6 @@ import * as THREE from 'three'
 import {
   generateAudienceQuestion,
   generateFollowUpQuestion,
-  speakQuestionTTS,
-  stopTTS,
   type QAQuestion,
 } from '../ai/qaEngine'
 import {
@@ -24,6 +22,7 @@ import {
   OptionalAudioRecorder,
   saveSessionSnapshot,
 } from '../lib/sessionRecorder'
+import { vrAudioEngine } from '../lib/vrAudioEngine'
 import { vrMicManager, type VRMicSnapshot } from '../lib/vrMicManager'
 import type {
   AppLanguage,
@@ -44,15 +43,16 @@ import { VRQuickDebrief } from './VRQuickDebrief'
 import {
   VRDebriefPanel3D,
   VRFloatingLobby3D,
+  VROneMinWarningBanner3D,
   VRPauseMenu3D,
   VRPodiumHUD,
+  VRQuestionBubble3D,
   VRTeleprompterBoard,
 } from './VRWorldUI'
 
 /**
  * Pure Full VR store — explicitly disables `offerSession` (prevents `InvalidStateError`
- * on Meta Quest Browser when entering VR via custom button and kills `immersive-ar`)
- * and disables all AR-only features (plane/mesh detection, hitTest, anchors, domOverlay).
+ * on Meta Quest Browser and kills `immersive-ar`) and disables all AR-only features.
  * `bounded: undefined` enforces `requiredFeatures: ['local-floor']` so physical floor = y: 0.
  */
 const xrStore = createXRStore({
@@ -76,33 +76,34 @@ type StagePhase = 'lobby' | 'vr_lobby' | 'active' | 'debrief'
 
 interface SeatTransform {
   x: number
-  /** Seated torso base Y (floor = 0, chair seat = 0.45m, head/eye = 1.20m + row rise) */
   floorY: number
   z: number
   yaw: number
   phase: number
   isDistracted: boolean
   isNodder: boolean
+  isNoteTaker: boolean
   jacketHex: string
   skinHex: string
 }
 
+// Warm, varied realistic everyday & professional clothing palette
 const JACKET_PALETTE = [
-  '#334155',
-  '#3b4252',
-  '#1e3a5f',
-  '#3f3f46',
-  '#312e81',
-  '#1f2937',
-  '#374151',
-  '#475569',
+  '#2c4a70', // warm navy
+  '#4f6d5a', // sage olive
+  '#7c3f4a', // muted burgundy
+  '#52657a', // slate blue
+  '#8c6a4a', // warm camel
+  '#4b5563', // soft charcoal
+  '#6b5b7b', // muted plum
+  '#3f5e68', // teal slate
 ]
 
-const SKIN_PALETTE = ['#e2b89b', '#d4a373', '#c68b59', '#8d5524', '#f1c27d', '#b87d56']
+const SKIN_PALETTE = ['#e6be9e', '#d6a57a', '#c48a5b', '#8e572b', '#f2c894', '#b4784e']
 
 /**
- * Computes real-world 1m = 1u seat coordinates relative to player spawn at (0, 0, 0) facing -Z.
- * Front row is 2.6m–3.4m away; seated head/eye height is 1.20m (within 1.15m–1.25m).
+ * Real-world 1m = 1u seat coordinates relative to player spawn at (0, 0, 0) facing -Z.
+ * Front row is 2.65m–3.45m away; seated head/eye height is 1.20m.
  */
 function computeVenueSeats(venue: VenueType): SeatTransform[] {
   const seats: SeatTransform[] = []
@@ -116,8 +117,9 @@ function computeVenueSeats(venue: VenueType): SeatTransform[] {
       phase: 0.4,
       isDistracted: false,
       isNodder: true,
-      jacketHex: '#1e293b',
-      skinHex: '#d4a373',
+      isNoteTaker: true,
+      jacketHex: '#2c4a70',
+      skinHex: '#d6a57a',
     })
     return seats
   }
@@ -133,6 +135,7 @@ function computeVenueSeats(venue: VenueType): SeatTransform[] {
         phase: idx * 1.7,
         isDistracted: false,
         isNodder: idx !== 2,
+        isNoteTaker: idx === 0,
         jacketHex: JACKET_PALETTE[idx % JACKET_PALETTE.length],
         skinHex: SKIN_PALETTE[(idx * 2) % SKIN_PALETTE.length],
       })
@@ -160,15 +163,17 @@ function computeVenueSeats(venue: VenueType): SeatTransform[] {
     const hash = (i * 2654435761) >>> 0
     const isDistracted = hash % 10 < 4
     const isNodder = hash % 10 < 7
+    const isNoteTaker = (hash >>> 2) % 5 === 0
 
     seats.push({
       x,
       floorY,
       z,
       yaw,
-      phase: (i * 0.67) % (Math.PI * 2),
+      phase: (i * 0.83) % (Math.PI * 2),
       isDistracted,
       isNodder,
+      isNoteTaker,
       jacketHex: JACKET_PALETTE[hash % JACKET_PALETTE.length],
       skinHex: SKIN_PALETTE[(hash >>> 4) % SKIN_PALETTE.length],
     })
@@ -177,39 +182,23 @@ function computeVenueSeats(venue: VenueType): SeatTransform[] {
   return seats
 }
 
-function getSeatCount(venue: VenueType): number {
-  switch (venue) {
-    case 'interview_room':
-      return 1
-    case 'panel_room':
-      return 3
-    case 'classroom':
-      return 30
-    case 'lecture_hall':
-      return 60
-    case 'auditorium':
-      return 200
-  }
-}
-
 interface InstancedAudienceProps {
-  venue: VenueType
+  seats: SeatTransform[]
   behaviour: AudienceBehaviour
   isPaused: boolean
   handRaisedIndex: number | null
 }
 
 /**
- * Human-proportioned instanced audience (NFR-01: 4 draw calls total for up to 200 avatars).
- * Seated head/eye height = floorY + 1.20m; realistic 0.105m head radius & shouldered torso.
+ * Organic, human-proportioned instanced audience (5 draw calls total for up to 200 seats = 72+ FPS).
+ * Staggered breathing, occasional head turns toward speaker, nodding, and note-taking motions.
  */
 function InstancedAudience({
-  venue,
+  seats,
   behaviour,
   isPaused,
   handRaisedIndex,
 }: InstancedAudienceProps) {
-  const seats = useMemo(() => computeVenueSeats(venue), [venue])
   const count = seats.length
 
   const chairRef = useRef<THREE.InstancedMesh>(null)
@@ -230,7 +219,6 @@ function InstancedAudience({
     [behaviour, seats],
   )
 
-  // Assign subtle varied clothing & skin tones via instanceColor (0 extra draw calls)
   useEffect(() => {
     if (!bodyRef.current || !headRef.current || !chairRef.current) return
     for (let i = 0; i < count; i++) {
@@ -240,7 +228,6 @@ function InstancedAudience({
       tempColor.set(s.skinHex)
       headRef.current.setColorAt(i, tempColor)
 
-      // Static chair backrest behind seated avatar
       dummy.position.set(s.x, s.floorY + 0.54, s.z - 0.19)
       dummy.rotation.set(-0.08, s.yaw, 0)
       dummy.scale.set(1, 1, 1)
@@ -259,38 +246,45 @@ function InstancedAudience({
       for (let i = 0; i < count; i++) {
         const s = seats[i]
 
+        // Gentle staggered organic breathing & subtle posture shift
+        const breath = Math.sin(t * 1.65 + s.phase * 1.9) * 0.011
+        const postureSway = Math.sin(t * 0.42 + s.phase * 2.3) * 0.018
+
         let bodyLeanX = 0
         if (behaviour === 'challenging') {
           bodyLeanX = -0.07
         } else if (behaviour === 'supportive') {
           bodyLeanX = 0.05
+        } else if (s.isNoteTaker) {
+          bodyLeanX = 0.04 + Math.max(0, Math.sin(t * 0.35 + s.phase)) * 0.05
         }
-        // Seated torso center at floorY + 0.78m (seat at 0.45m, shoulders at ~1.04m)
-        dummy.position.set(s.x, s.floorY + 0.78, s.z)
-        dummy.rotation.set(bodyLeanX, s.yaw, 0)
-        dummy.scale.set(1.16, 1.0, 0.68)
+
+        dummy.position.set(s.x, s.floorY + 0.78 + breath, s.z)
+        dummy.rotation.set(bodyLeanX, s.yaw + postureSway, postureSway * 0.3)
+        dummy.scale.set(1.16, 1.0 + breath * 0.8, 0.68)
         dummy.updateMatrix()
         bodyRef.current.setMatrixAt(i, dummy.matrix)
 
-        let headPitch = 0
-        let headYaw = s.yaw
-        let headRoll = 0
+        // Organic staggered head motion (nodding, note-taking glances, speaker focus)
+        const slowWave = Math.sin(t * 0.55 + s.phase)
+        const noteGlance =
+          s.isNoteTaker && Math.sin(t * 0.28 + s.phase * 1.7) > 0.65 ? 0.28 : 0
+
+        let headPitch = noteGlance + Math.sin(t * 1.1 + s.phase) * 0.025
+        let headYaw = s.yaw + slowWave * 0.075
+        let headRoll = Math.sin(t * 0.38 + s.phase * 1.3) * 0.03
 
         if (behaviour === 'supportive' && s.isNodder) {
-          headPitch = Math.sin(t * 2.2 + s.phase) * 0.11
-        } else if (behaviour === 'attentive') {
-          headYaw = s.yaw + Math.sin(t * 0.65 + s.phase) * 0.08
-          headPitch = Math.sin(t * 0.9 + s.phase) * 0.03
+          headPitch += Math.sin(t * 2.1 + s.phase) * 0.095
         } else if (behaviour === 'distracted' && s.isDistracted) {
-          headPitch = 0.38 + Math.sin(t * 1.1 + s.phase) * 0.04
-          headYaw = s.yaw + (i % 2 === 0 ? 0.32 : -0.32)
+          headPitch = 0.36 + Math.sin(t * 1.1 + s.phase) * 0.04
+          headYaw = s.yaw + (i % 2 === 0 ? 0.32 : -0.32) * (0.7 + 0.3 * Math.sin(t * 0.5 + s.phase))
         } else if (behaviour === 'challenging') {
-          headRoll = i % 2 === 0 ? 0.09 : -0.09
-          headPitch = -0.05 + Math.sin(t * 0.7 + s.phase) * 0.03
+          headRoll = (i % 2 === 0 ? 0.08 : -0.08) + Math.sin(t * 0.4 + s.phase) * 0.02
+          headPitch = -0.04 + Math.sin(t * 0.7 + s.phase) * 0.025
         }
 
-        // Seated head/eye center at floorY + 1.20m (1.15m–1.25m real-world spec)
-        dummy.position.set(s.x, s.floorY + 1.20, s.z + 0.02)
+        dummy.position.set(s.x, s.floorY + 1.20 + breath * 1.15, s.z + 0.02)
         dummy.rotation.set(headPitch, headYaw, headRoll)
         dummy.scale.set(0.95, 1.12, 1.0)
         dummy.updateMatrix()
@@ -342,25 +336,21 @@ function InstancedAudience({
 
   return (
     <group>
-      {/* Instanced auditorium/office chairs */}
       <instancedMesh ref={chairRef} args={[undefined, undefined, count]} frustumCulled={false}>
         <boxGeometry args={[0.46, 0.72, 0.09]} />
-        <meshStandardMaterial color="#172033" roughness={0.88} metalness={0.08} />
+        <meshStandardMaterial color="#334155" roughness={0.85} metalness={0.05} />
       </instancedMesh>
 
-      {/* Human-proportioned seated torsos */}
       <instancedMesh ref={bodyRef} args={[undefined, undefined, count]} frustumCulled={false}>
         <capsuleGeometry args={[0.165, 0.28, 4, 10]} />
-        <meshStandardMaterial color="#ffffff" roughness={0.82} metalness={0.05} />
+        <meshStandardMaterial color="#ffffff" roughness={0.8} metalness={0.04} />
       </instancedMesh>
 
-      {/* Human-proportioned heads (radius 0.105m = ~21cm diameter) */}
       <instancedMesh ref={headRef} args={[undefined, undefined, count]} frustumCulled={false}>
         <sphereGeometry args={[0.105, 12, 12]} />
-        <meshStandardMaterial color="#ffffff" roughness={0.68} />
+        <meshStandardMaterial color="#ffffff" roughness={0.65} />
       </instancedMesh>
 
-      {/* Distracted smartphone glow */}
       {distractedIndices.length > 0 && (
         <instancedMesh
           ref={phoneRef}
@@ -372,7 +362,6 @@ function InstancedAudience({
         </instancedMesh>
       )}
 
-      {/* Raised hand for Q&A */}
       <instancedMesh ref={handRef} args={[undefined, undefined, 1]} frustumCulled={false}>
         <capsuleGeometry args={[0.045, 0.34, 4, 8]} />
         <meshStandardMaterial color="#f59e0b" emissive="#d97706" emissiveIntensity={0.65} />
@@ -408,6 +397,7 @@ function useSlideCanvasTexture(
   sessionTitle: string,
   activeTopic: Topic | undefined,
   nextTopic: Topic | undefined,
+  allTopics: Topic[],
   slideIndex: number,
   totalSlides: number,
   isInterview: boolean,
@@ -418,10 +408,13 @@ function useSlideCanvasTexture(
 ): THREE.CanvasTexture {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas')
-    canvas.width = 1024
-    canvas.height = 512
+    canvas.width = 1600
+    canvas.height = 800
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
+    tex.generateMipmaps = true
+    tex.minFilter = THREE.LinearMipmapLinearFilter
+    tex.magFilter = THREE.LinearFilter
     return tex
   }, [])
 
@@ -431,16 +424,16 @@ function useSlideCanvasTexture(
     if (!ctx) return
 
     const isConfidence = variant === 'confidence'
-    ctx.fillStyle = isConfidence ? '#090f1d' : '#f8fafc'
+    ctx.fillStyle = isConfidence ? '#0f172a' : '#ffffff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
     ctx.fillStyle = isConfidence ? '#14b8a6' : '#1d4ed8'
-    ctx.fillRect(0, 0, canvas.width, 14)
+    ctx.fillRect(0, 0, canvas.width, 20)
 
     ctx.fillStyle = isConfidence ? '#94a3b8' : '#475569'
-    ctx.font = 'bold 28px Inter, system-ui, sans-serif'
+    ctx.font = '700 36px Inter, system-ui, sans-serif'
     const counter = `${isInterview ? 'Question' : 'Slide'} ${slideIndex + 1} / ${Math.max(1, totalSlides)}`
-    ctx.fillText(counter, 48, 70)
+    ctx.fillText(counter, 68, 96)
 
     if (isConfidence) {
       const mins = Math.floor(Math.max(0, remainingSeconds) / 60)
@@ -448,40 +441,67 @@ function useSlideCanvasTexture(
       const clock = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
       ctx.fillStyle = remainingSeconds <= 60 ? '#fbbf24' : '#38bdf8'
       ctx.textAlign = 'right'
-      ctx.font = 'bold 38px monospace'
-      ctx.fillText(clock, canvas.width - 48, 72)
+      ctx.font = '800 50px monospace'
+      ctx.fillText(clock, canvas.width - 68, 98)
       ctx.textAlign = 'left'
     } else {
       ctx.textAlign = 'right'
-      ctx.fillText(sessionTitle.slice(0, 32), canvas.width - 48, 70)
+      ctx.fillText(sessionTitle.slice(0, 36), canvas.width - 68, 96)
       ctx.textAlign = 'left'
     }
 
     ctx.fillStyle = isConfidence ? '#f8fafc' : '#0f172a'
-    ctx.font = '800 54px Inter, system-ui, sans-serif'
+    ctx.font = '800 72px Inter, system-ui, sans-serif'
     const headline = activeTopic?.title || sessionTitle
-    const lines = wrapCanvasText(ctx, headline, canvas.width - 96, 3)
+    const lines = wrapCanvasText(ctx, headline, canvas.width - 136, 2)
     lines.forEach((line, i) => {
-      ctx.fillText(line, 48, 170 + i * 68)
+      ctx.fillText(line, 68, 210 + i * 86)
     })
+
+    // Crisp bullet points on the in-room projector screen
+    if (!isConfidence) {
+      const bullets = [
+        activeTopic?.brief
+          ? `Key takeaway: keep "${headline}" concise and focused`
+          : `Core focus: walk through concrete evidence for ${headline}`,
+        nextTopic
+          ? `Transition bridge → ${nextTopic.title}`
+          : 'Closing summary & clear call to action',
+        `Section ${slideIndex + 1} of ${Math.max(1, allTopics.length)} — maintain steady eye contact across the room`,
+      ]
+      ctx.fillStyle = '#334155'
+      ctx.font = '500 38px Inter, system-ui, sans-serif'
+      bullets.forEach((bullet, idx) => {
+        const y = 430 + idx * 82
+        ctx.fillStyle = '#1d4ed8'
+        ctx.beginPath()
+        ctx.arc(82, y - 12, 9, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#1e293b'
+        ctx.fillText(bullet.slice(0, 62), 112, y)
+      })
+    }
 
     if (activeTopic?.brief) {
       ctx.fillStyle = '#0f766e'
-      ctx.fillRect(48, 385, 130, 42)
+      ctx.beginPath()
+      ctx.roundRect(68, 690, 170, 56, 12)
+      ctx.fill()
       ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 24px Inter, system-ui, sans-serif'
-      ctx.fillText(briefLabel.toUpperCase(), 70, 414)
+      ctx.font = '700 28px Inter, system-ui, sans-serif'
+      ctx.fillText(briefLabel.toUpperCase(), 96, 728)
     }
 
     if (isConfidence && nextTopic) {
       ctx.fillStyle = '#94a3b8'
-      ctx.font = '600 26px Inter, system-ui, sans-serif'
-      ctx.fillText(`${nextUpLabel}: ${nextTopic.title.slice(0, 48)}`, 48, 466)
+      ctx.font = '600 36px Inter, system-ui, sans-serif'
+      ctx.fillText(`${nextUpLabel}: ${nextTopic.title.slice(0, 48)}`, 68, 728)
     }
 
     texture.needsUpdate = true
   }, [
     activeTopic,
+    allTopics.length,
     briefLabel,
     isInterview,
     nextTopic,
@@ -507,269 +527,289 @@ interface RoomDimensions {
   height: number
   frontZ: number
   backZ: number
-  fogNear: number
-  fogFar: number
 }
 
 function getRoomDimensions(venue: VenueType): RoomDimensions {
   switch (venue) {
     case 'interview_room':
-      return { width: 5.8, depth: 6.8, height: 3.5, frontZ: -4.6, backZ: 2.2, fogNear: 6, fogFar: 18 }
+      return { width: 5.8, depth: 6.8, height: 3.5, frontZ: -4.6, backZ: 2.2 }
     case 'panel_room':
-      return { width: 7.8, depth: 7.6, height: 3.6, frontZ: -5.4, backZ: 2.2, fogNear: 7, fogFar: 20 }
+      return { width: 7.8, depth: 7.6, height: 3.6, frontZ: -5.4, backZ: 2.2 }
     case 'classroom':
-      return { width: 9.6, depth: 12.0, height: 3.8, frontZ: -9.6, backZ: 2.4, fogNear: 9, fogFar: 24 }
+      return { width: 9.6, depth: 12.0, height: 3.8, frontZ: -9.6, backZ: 2.4 }
     case 'lecture_hall':
-      return { width: 13.8, depth: 14.0, height: 4.6, frontZ: -11.4, backZ: 2.6, fogNear: 11, fogFar: 28 }
+      return { width: 13.8, depth: 14.0, height: 4.6, frontZ: -11.4, backZ: 2.6 }
     case 'auditorium':
-      return { width: 22.0, depth: 19.6, height: 5.0, frontZ: -16.8, backZ: 2.8, fogNear: 14, fogFar: 36 }
+      return { width: 22.0, depth: 19.6, height: 5.0, frontZ: -16.8, backZ: 2.8 }
   }
 }
 
 /**
- * Enclosed sleek dark VR Lobby chamber (10m × 10m × 4.2m) with subtle glowing
- * concentric floor rings so Quest users land in a rich native-feeling VR space
- * with zero passthrough bleed-through.
+ * Enclosed architectural VR Lobby chamber with crisp, zero-Z-fighting floor rings.
  */
 function VRLobbyEnvironment() {
   return (
     <group>
-      {/* Floor at y = 0 */}
+      {/* Floor strictly at y = 0 */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[12, 12]} />
-        <meshStandardMaterial color="#0b1120" roughness={0.85} metalness={0.12} />
+        <meshStandardMaterial color="#1e293b" roughness={0.82} metalness={0.08} />
       </mesh>
-      {/* Subtle concentric glowing floor rings */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0]}>
-        <ringGeometry args={[1.42, 1.46, 64]} />
-        <meshStandardMaterial color="#14b8a6" emissive="#0d9488" emissiveIntensity={1.1} />
+      {/* Floor rings lifted +0.02m so zero Z-fighting ever occurs */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <ringGeometry args={[1.42, 1.47, 64]} />
+        <meshStandardMaterial color="#14b8a6" emissive="#0d9488" emissiveIntensity={0.9} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0]}>
-        <ringGeometry args={[2.45, 2.48, 64]} />
-        <meshStandardMaterial color="#38bdf8" emissive="#0284c7" emissiveIntensity={0.7} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <ringGeometry args={[2.45, 2.49, 64]} />
+        <meshStandardMaterial color="#38bdf8" emissive="#0284c7" emissiveIntensity={0.6} />
       </mesh>
-      {/* Ceiling */}
+      {/* Bright enclosed ceiling */}
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 4.2, 0]}>
         <planeGeometry args={[12, 12]} />
-        <meshStandardMaterial color="#070b14" roughness={0.95} />
+        <meshStandardMaterial color="#334155" roughness={0.9} />
       </mesh>
       {/* Enclosed 4 walls */}
       <mesh position={[0, 2.1, -6]}>
         <planeGeometry args={[12, 4.2]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+        <meshStandardMaterial color="#273449" roughness={0.88} />
       </mesh>
       <mesh position={[0, 2.1, 6]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[12, 4.2]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+        <meshStandardMaterial color="#273449" roughness={0.88} />
       </mesh>
       <mesh position={[-6, 2.1, 0]} rotation={[0, Math.PI / 2, 0]}>
         <planeGeometry args={[12, 4.2]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+        <meshStandardMaterial color="#273449" roughness={0.88} />
       </mesh>
       <mesh position={[6, 2.1, 0]} rotation={[0, -Math.PI / 2, 0]}>
         <planeGeometry args={[12, 4.2]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+        <meshStandardMaterial color="#273449" roughness={0.88} />
       </mesh>
-      {/* Soft overhead halo light ring */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 4.15, -1.2]}>
-        <ringGeometry args={[1.6, 1.66, 64]} />
-        <meshStandardMaterial color="#e0f2fe" emissive="#38bdf8" emissiveIntensity={0.9} />
+      {/* Overhead light halo separated -0.04m from ceiling */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 4.16, -1.2]}>
+        <ringGeometry args={[1.6, 1.68, 64]} />
+        <meshStandardMaterial color="#f8fafc" emissive="#bae6fd" emissiveIntensity={1.0} />
       </mesh>
     </group>
   )
 }
 
 /**
- * Enclosed architectural room shell (floor, ceiling, 4 walls, acoustic slats,
- * recessed LED ceiling strips, stage apron trim, and real-world 1.05m podium).
- * Zero open gaps so passthrough can never bleed through in 360 degrees.
+ * Bright, humanized architectural room shells (all 6 sides enclosed, zero Z-fighting,
+ * natural oak wood podium/floor `#9c734b`, warm off-white/slate walls, stage top at y = 0).
  */
 function VenueArchitecture({ venue }: { venue: VenueType }) {
   const dim = getRoomDimensions(venue)
   const centerZ = (dim.frontZ + dim.backZ) / 2
   const isTableVenue = venue === 'interview_room' || venue === 'panel_room'
 
-  const wallMat = { color: '#111827', roughness: 0.92, metalness: 0.05 }
-  const slatMat = { color: '#1e293b', roughness: 0.85, metalness: 0.08 }
+  const palette =
+    venue === 'classroom' || venue === 'interview_room'
+      ? {
+          wall: '#dfe5ec',
+          slat: '#cbd5e1',
+          ceiling: '#f1f5f9',
+          floor: '#b08968',
+          wood: '#9c734b',
+          trim: '#0f766e',
+        }
+      : venue === 'lecture_hall' || venue === 'panel_room'
+        ? {
+            wall: '#cbd5e1',
+            slat: '#94a3b8',
+            ceiling: '#e2e8f0',
+            floor: '#8b6f56',
+            wood: '#9c734b',
+            trim: '#1d4ed8',
+          }
+        : {
+            // Auditorium: warm architectural walnut wood + bright slate upper tone
+            wall: '#6b4c35',
+            slat: '#523826',
+            ceiling: '#334155',
+            floor: '#475569',
+            wood: '#9c734b',
+            trim: '#14b8a6',
+          }
 
   return (
     <group>
-      {/* Enclosed Room Shell: Floor, Ceiling, Front/Back/Left/Right Walls */}
-      {/* Main Floor (y = 0 = physical floor in local-floor referenceSpace) */}
+      {/* Main Room Floor strictly at y = 0 */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, centerZ]}>
         <planeGeometry args={[dim.width, dim.depth]} />
-        <meshStandardMaterial color="#141926" roughness={0.88} metalness={0.05} />
+        <meshStandardMaterial color={palette.floor} roughness={0.82} metalness={0.04} />
       </mesh>
 
-      {/* Ceiling (enclosed overhead) */}
+      {/* Ceiling */}
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, dim.height, centerZ]}>
         <planeGeometry args={[dim.width, dim.depth]} />
-        <meshStandardMaterial color="#0b1120" roughness={0.95} />
+        <meshStandardMaterial color={palette.ceiling} roughness={0.92} />
       </mesh>
 
       {/* Front Wall (behind audience) */}
       <mesh position={[0, dim.height / 2, dim.frontZ]}>
         <planeGeometry args={[dim.width, dim.height]} />
-        <meshStandardMaterial {...wallMat} />
+        <meshStandardMaterial color={palette.wall} roughness={0.88} />
       </mesh>
 
       {/* Back Wall (behind presenter) */}
       <mesh position={[0, dim.height / 2, dim.backZ]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[dim.width, dim.height]} />
-        <meshStandardMaterial {...wallMat} />
+        <meshStandardMaterial color={palette.wall} roughness={0.88} />
       </mesh>
 
-      {/* Left Wall */}
+      {/* Left & Right Walls */}
       <mesh position={[-dim.width / 2, dim.height / 2, centerZ]} rotation={[0, Math.PI / 2, 0]}>
         <planeGeometry args={[dim.depth, dim.height]} />
-        <meshStandardMaterial {...wallMat} />
+        <meshStandardMaterial color={palette.wall} roughness={0.88} />
       </mesh>
-
-      {/* Right Wall */}
       <mesh position={[dim.width / 2, dim.height / 2, centerZ]} rotation={[0, -Math.PI / 2, 0]}>
         <planeGeometry args={[dim.depth, dim.height]} />
-        <meshStandardMaterial {...wallMat} />
+        <meshStandardMaterial color={palette.wall} roughness={0.88} />
       </mesh>
 
-      {/* Architectural Acoustic Wall Panels on Front Wall */}
+      {/* Architectural Acoustic Panels separated +0.06m from Front Wall (zero Z-fighting) */}
       {[-0.32, 0, 0.32].map((ratio) => (
         <mesh
           key={ratio}
-          position={[dim.width * ratio, dim.height * 0.48, dim.frontZ + 0.04]}
+          position={[dim.width * ratio, dim.height * 0.48, dim.frontZ + 0.06]}
         >
-          <boxGeometry args={[dim.width * 0.24, dim.height * 0.72, 0.05]} />
-          <meshStandardMaterial {...slatMat} />
+          <boxGeometry args={[dim.width * 0.24, dim.height * 0.70, 0.06]} />
+          <meshStandardMaterial color={palette.slat} roughness={0.82} />
         </mesh>
       ))}
 
-      {/* Recessed Linear Warm-White LED Ceiling Strips */}
+      {/* Recessed Warm-White Ceiling Light Strips separated -0.04m from ceiling */}
       {[-dim.width * 0.24, dim.width * 0.24].map((x) => (
-        <mesh key={x} position={[x, dim.height - 0.02, centerZ]}>
-          <boxGeometry args={[0.10, 0.03, dim.depth * 0.72]} />
+        <mesh key={x} position={[x, dim.height - 0.04, centerZ]}>
+          <boxGeometry args={[0.16, 0.04, dim.depth * 0.72]} />
           <meshStandardMaterial
-            color="#fef3c7"
-            emissive="#fde68a"
-            emissiveIntensity={0.85}
-            roughness={0.3}
+            color="#fffbeb"
+            emissive="#fef3c7"
+            emissiveIntensity={1.1}
+            roughness={0.25}
           />
         </mesh>
       ))}
 
-      {/* Subtle Emissive Teal Baseboard Accent Strip on Front Wall */}
-      <mesh position={[0, 0.05, dim.frontZ + 0.03]}>
-        <boxGeometry args={[dim.width * 0.92, 0.035, 0.02]} />
-        <meshStandardMaterial color="#14b8a6" emissive="#0d9488" emissiveIntensity={1.1} />
+      {/* Baseboard Accent Strip separated +0.04m from Front Wall */}
+      <mesh position={[0, 0.06, dim.frontZ + 0.04]}>
+        <boxGeometry args={[dim.width * 0.92, 0.04, 0.03]} />
+        <meshStandardMaterial color={palette.trim} roughness={0.5} />
       </mesh>
 
       {/* Venue-Specific Furniture & Stage Architecture */}
       {venue === 'interview_room' && (
         <group>
-          {/* Warm wood stage/rug zone under presenter */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, -0.8]}>
-            <planeGeometry args={[3.6, 4.4]} />
-            <meshStandardMaterial color="#1e293b" roughness={0.92} />
+          {/* Soft office area rug lifted +0.02m above floor */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, -0.9]}>
+            <planeGeometry args={[3.6, 4.2]} />
+            <meshStandardMaterial color="#64748b" roughness={0.94} />
           </mesh>
-          {/* Interview conference table (real-world 0.74m height) */}
+          {/* Natural oak interview table (0.74m tall) */}
           <mesh position={[0, 0.74, -1.85]}>
             <boxGeometry args={[2.2, 0.06, 0.88]} />
-            <meshStandardMaterial color="#4a3222" roughness={0.55} metalness={0.08} />
+            <meshStandardMaterial color={palette.wood} roughness={0.55} />
           </mesh>
           <mesh position={[-0.95, 0.37, -1.85]}>
             <boxGeometry args={[0.08, 0.72, 0.72]} />
-            <meshStandardMaterial color="#1f2937" roughness={0.4} metalness={0.6} />
+            <meshStandardMaterial color="#334155" roughness={0.45} metalness={0.4} />
           </mesh>
           <mesh position={[0.95, 0.37, -1.85]}>
             <boxGeometry args={[0.08, 0.72, 0.72]} />
-            <meshStandardMaterial color="#1f2937" roughness={0.4} metalness={0.6} />
+            <meshStandardMaterial color="#334155" roughness={0.45} metalness={0.4} />
           </mesh>
-          {/* Interviewer laptop & notebook */}
+          {/* Interviewer laptop */}
           <mesh position={[0.32, 0.79, -2.02]} rotation={[-0.18, 0.18, 0]}>
-            <boxGeometry args={[0.34, 0.018, 0.23]} />
-            <meshStandardMaterial color="#334155" metalness={0.5} roughness={0.35} />
+            <boxGeometry args={[0.34, 0.02, 0.23]} />
+            <meshStandardMaterial color="#475569" metalness={0.5} roughness={0.35} />
           </mesh>
-          {/* Sleek Waist-Height Console Stand for Presenter HUD */}
+          {/* Waist-height console stand */}
           <mesh position={[0, 0.48, -0.86]}>
             <cylinderGeometry args={[0.032, 0.045, 0.94, 12]} />
-            <meshStandardMaterial color="#1f2937" metalness={0.65} roughness={0.35} />
+            <meshStandardMaterial color="#334155" metalness={0.55} roughness={0.35} />
           </mesh>
-          <mesh position={[0, 0.015, -0.86]}>
+          <mesh position={[0, 0.03, -0.86]}>
             <cylinderGeometry args={[0.20, 0.22, 0.03, 16]} />
-            <meshStandardMaterial color="#111827" metalness={0.5} roughness={0.45} />
+            <meshStandardMaterial color="#1e293b" metalness={0.45} roughness={0.45} />
           </mesh>
         </group>
       )}
 
       {venue === 'panel_room' && (
         <group>
-          {/* Panel table (real-world 0.74m height, 4.1m wide) */}
           <mesh position={[0, 0.74, -2.05]}>
             <boxGeometry args={[4.1, 0.065, 0.88]} />
-            <meshStandardMaterial color="#4a3222" roughness={0.58} metalness={0.08} />
+            <meshStandardMaterial color={palette.wood} roughness={0.55} />
           </mesh>
           {[-1.75, 0, 1.75].map((x) => (
             <mesh key={x} position={[x, 0.37, -2.05]}>
               <boxGeometry args={[0.09, 0.72, 0.72]} />
-              <meshStandardMaterial color="#1f2937" roughness={0.4} metalness={0.6} />
+              <meshStandardMaterial color="#334155" roughness={0.45} metalness={0.4} />
             </mesh>
           ))}
-          {/* Panelist nameplates */}
           {[-1.28, 0, 1.28].map((x) => (
             <mesh key={x} position={[x, 0.82, -1.66]}>
               <boxGeometry args={[0.38, 0.10, 0.04]} />
-              <meshStandardMaterial color="#cbd5e1" roughness={0.4} />
+              <meshStandardMaterial color="#f8fafc" roughness={0.4} />
             </mesh>
           ))}
-          {/* Sleek Waist-Height Console Stand */}
           <mesh position={[0, 0.48, -0.86]}>
             <cylinderGeometry args={[0.032, 0.045, 0.94, 12]} />
-            <meshStandardMaterial color="#1f2937" metalness={0.65} roughness={0.35} />
+            <meshStandardMaterial color="#334155" metalness={0.55} roughness={0.35} />
           </mesh>
-          <mesh position={[0, 0.015, -0.86]}>
+          <mesh position={[0, 0.02, -0.86]}>
             <cylinderGeometry args={[0.20, 0.22, 0.03, 16]} />
-            <meshStandardMaterial color="#111827" metalness={0.5} roughness={0.45} />
+            <meshStandardMaterial color="#1e293b" metalness={0.45} roughness={0.45} />
           </mesh>
         </group>
       )}
 
       {!isTableVenue && (
         <group>
-          {/* Warm Wood Stage Floor Deck under Presenter (flush near y=0 so feet stay at y=0) */}
-          <mesh position={[0, 0.008, -0.25]}>
-            <boxGeometry args={[venue === 'auditorium' ? 12.0 : venue === 'lecture_hall' ? 8.6 : 6.4, 0.016, 3.4]} />
-            <meshStandardMaterial color="#4a3222" roughness={0.62} metalness={0.06} />
+          {/* Natural Oak Stage Deck: top sits flush at y = 0.00 so player NEVER sinks below floor */}
+          <mesh position={[0, -0.02, -0.25]}>
+            <boxGeometry
+              args={[
+                venue === 'auditorium' ? 12.0 : venue === 'lecture_hall' ? 8.6 : 6.4,
+                0.04,
+                3.4,
+              ]}
+            />
+            <meshStandardMaterial color={palette.wood} roughness={0.6} />
           </mesh>
-          {/* Emissive Teal Stage Apron Strip */}
-          <mesh position={[0, 0.018, -1.94]}>
-            <boxGeometry args={[venue === 'auditorium' ? 12.0 : venue === 'lecture_hall' ? 8.6 : 6.4, 0.018, 0.04]} />
-            <meshStandardMaterial color="#2dd4bf" emissive="#0d9488" emissiveIntensity={1.15} />
+          {/* Stage apron edge trim separated +0.02m above floor */}
+          <mesh position={[0, 0.02, -1.94]}>
+            <boxGeometry
+              args={[
+                venue === 'auditorium' ? 12.0 : venue === 'lecture_hall' ? 8.6 : 6.4,
+                0.022,
+                0.045,
+              ]}
+            />
+            <meshStandardMaterial color="#14b8a6" emissive="#0d9488" emissiveIntensity={0.85} />
           </mesh>
 
-          {/* Real-World 3D Architectural Podium: 0.66m W × 1.05m H × 0.48m D at z = -0.68m */}
+          {/* Natural Oak 3D Architectural Podium: 0.66m W × 1.05m H × 0.48m D at z = -0.68m */}
           <group position={[0, 0, -0.68]}>
-            {/* Base plinth */}
             <mesh position={[0, 0.035, 0]}>
               <boxGeometry args={[0.64, 0.07, 0.48]} />
-              <meshStandardMaterial color="#1f2937" roughness={0.45} metalness={0.55} />
+              <meshStandardMaterial color="#334155" roughness={0.45} metalness={0.4} />
             </mesh>
-            {/* Main warm walnut column */}
             <mesh position={[0, 0.54, 0]}>
               <boxGeometry args={[0.56, 0.94, 0.38]} />
-              <meshStandardMaterial color="#4a3222" roughness={0.56} metalness={0.08} />
+              <meshStandardMaterial color={palette.wood} roughness={0.54} />
             </mesh>
-            {/* Front brushed metal accent plate facing audience */}
-            <mesh position={[0, 0.56, -0.196]}>
-              <boxGeometry args={[0.42, 0.72, 0.012]} />
-              <meshStandardMaterial color="#1e293b" roughness={0.38} metalness={0.65} />
+            {/* Front accent plate separated +0.02m from column front (-0.19 -> -0.21) */}
+            <mesh position={[0, 0.56, -0.21]}>
+              <boxGeometry args={[0.42, 0.72, 0.02]} />
+              <meshStandardMaterial color="#334155" roughness={0.4} metalness={0.45} />
             </mesh>
-            {/* Subtle glowing Stagera accent line on front of podium */}
-            <mesh position={[0, 0.88, -0.204]}>
-              <boxGeometry args={[0.32, 0.016, 0.01]} />
-              <meshStandardMaterial color="#38bdf8" emissive="#0284c7" emissiveIntensity={1.2} />
-            </mesh>
-            {/* Angled 35-degree lectern top surface (supports VRPodiumHUD) */}
+            {/* Angled 35-degree lectern top */}
             <mesh position={[0, 1.045, 0.02]} rotation={[-0.96, 0, 0]}>
-              <boxGeometry args={[0.66, 0.44, 0.036]} />
-              <meshStandardMaterial color="#3b2619" roughness={0.5} metalness={0.1} />
+              <boxGeometry args={[0.68, 0.46, 0.036]} />
+              <meshStandardMaterial color="#7d5a38" roughness={0.5} />
             </mesh>
           </group>
 
@@ -786,8 +826,8 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
                   key={row}
                   position={[0, riserHeight / 2 - rise, startZ - row * spacingZ]}
                 >
-                  <boxGeometry args={[riserWidth, riserHeight, spacingZ - 0.04]} />
-                  <meshStandardMaterial color="#161f32" roughness={0.9} />
+                  <boxGeometry args={[riserWidth, riserHeight, spacingZ - 0.05]} />
+                  <meshStandardMaterial color="#475569" roughness={0.88} />
                 </mesh>
               )
             })}
@@ -798,28 +838,53 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
 }
 
 /**
- * Bridges WebXR `sessionstart` (resuming AudioContext for quest mic capture)
- * and controller triggers (prev/next slide when not hovering a 3D UI button).
+ * Monitors XR sessionstart (resumes mic + procedural audio), controller triggers
+ * (slide control or S2.1 lobby trigger test), and automatic low-head-height comfort lift.
  */
 function XRAudioAndTriggerBridge({
   isPaused,
+  isVRLobby,
+  seatedHeightMode,
   uiHoveredCountRef,
   onPrevSlide,
   onNextSlide,
+  onLobbyTriggerTest,
+  onAutoHeightOffsetChange,
 }: {
   isPaused: boolean
+  isVRLobby: boolean
+  seatedHeightMode: boolean
   uiHoveredCountRef: React.MutableRefObject<number>
   onPrevSlide: () => void
   onNextSlide: () => void
+  onLobbyTriggerTest: () => void
+  onAutoHeightOffsetChange: (offset: number) => void
 }) {
-  const { gl } = useThree()
+  const { gl, camera } = useThree()
+  const checkedAutoHeightRef = useRef(false)
+
+  useFrame(() => {
+    if (!gl.xr.isPresenting || seatedHeightMode || checkedAutoHeightRef.current) return
+    // If headset reports seated/low eye height (< 1.28m) on entry, apply +0.25m comfort lift
+    if (camera.position.y > 0.15 && camera.position.y < 1.28) {
+      checkedAutoHeightRef.current = true
+      onAutoHeightOffsetChange(0.25)
+    } else if (camera.position.y >= 1.28) {
+      checkedAutoHeightRef.current = true
+    }
+  })
 
   useEffect(() => {
     const xr = gl.xr
     let attachedSession: XRSession | null = null
 
     const onSelectStart = (event: XRInputSourceEvent) => {
-      if (isPaused || uiHoveredCountRef.current > 0) return
+      if (uiHoveredCountRef.current > 0) return
+      if (isVRLobby) {
+        onLobbyTriggerTest()
+        return
+      }
+      if (isPaused) return
       if (event.inputSource.handedness === 'left') {
         onPrevSlide()
       } else {
@@ -828,8 +893,9 @@ function XRAudioAndTriggerBridge({
     }
 
     const onSessionStart = () => {
-      // Explicitly resume AudioContext upon WebXR session entry (Quest Browser fix)
+      checkedAutoHeightRef.current = false
       void vrMicManager.resumeAudioContext()
+      void vrAudioEngine.resume()
       const session = xr.getSession()
       if (session) {
         attachedSession = session
@@ -838,6 +904,8 @@ function XRAudioAndTriggerBridge({
     }
 
     const onSessionEnd = () => {
+      checkedAutoHeightRef.current = false
+      onAutoHeightOffsetChange(0)
       if (attachedSession) {
         attachedSession.removeEventListener('selectstart', onSelectStart)
         attachedSession = null
@@ -853,8 +921,36 @@ function XRAudioAndTriggerBridge({
       xr.removeEventListener('sessionend', onSessionEnd)
       onSessionEnd()
     }
-  }, [gl, isPaused, onNextSlide, onPrevSlide, uiHoveredCountRef])
+  }, [
+    gl,
+    isPaused,
+    isVRLobby,
+    onAutoHeightOffsetChange,
+    onLobbyTriggerTest,
+    onNextSlide,
+    onPrevSlide,
+    uiHoveredCountRef,
+  ])
 
+  return null
+}
+
+/** Watches live mic level in S2.1 VR Lobby to auto-pass Step 1 ("✓ Good level") */
+function LobbyMicCheckWatcher({
+  active,
+  alreadyPassed,
+  onPass,
+}: {
+  active: boolean
+  alreadyPassed: boolean
+  onPass: () => void
+}) {
+  useFrame(() => {
+    if (!active || alreadyPassed) return
+    if (vrMicManager.sampleLevel() > 0.08) {
+      onPass()
+    }
+  })
   return null
 }
 
@@ -871,7 +967,7 @@ function DesktopMouseLook({
 }) {
   const { camera, gl } = useThree()
   const yawRef = useRef(0)
-  const pitchRef = useRef(-0.08)
+  const pitchRef = useRef(-0.04)
   const draggingRef = useRef(false)
   const lastPosRef = useRef({ x: 0, y: 0 })
 
@@ -932,7 +1028,7 @@ function DesktopMouseLook({
     const onDoubleClick = () => {
       if (xr.isPresenting || isPaused) return
       yawRef.current = 0
-      pitchRef.current = -0.08
+      pitchRef.current = -0.04
       syncRotation()
     }
 
@@ -973,21 +1069,26 @@ function DesktopMouseLook({
 }
 
 /**
- * Head-Gaze Zone Tracker (FR-16): reads active camera world direction every frame
- * (works identically with Quest 3 XR headset tracking and Desktop Mouse Look).
+ * Head-Gaze Zone Tracker (FR-16 & S2.1 3-Dot Auto-Calibration):
+ * Reads active camera world direction every frame.
  */
 function CameraGazeTracker({
   isPaused,
+  isVRLobby,
   dwellRef,
   onZoneChange,
+  onLobbyGazeZone,
 }: {
   isPaused: boolean
+  isVRLobby: boolean
   dwellRef: React.MutableRefObject<{ left: number; centre: number; right: number }>
   onZoneChange: (zone: GazeZone) => void
+  onLobbyGazeZone: (zone: GazeZone) => void
 }) {
   const { camera } = useThree()
   const dirVec = useMemo(() => new THREE.Vector3(), [])
   const lastZoneRef = useRef<GazeZone>('centre')
+  const lobbyHoldRef = useRef<{ zone: GazeZone; time: number }>({ zone: 'centre', time: 0 })
 
   useFrame((_, delta) => {
     if (isPaused) return
@@ -995,8 +1096,20 @@ function CameraGazeTracker({
     camera.getWorldDirection(dirVec)
     const yawRad = Math.atan2(-dirVec.x, -dirVec.z)
     const zone: GazeZone = yawRad > 0.25 ? 'left' : yawRad < -0.25 ? 'right' : 'centre'
-    dwellRef.current[zone] += dt
 
+    if (isVRLobby) {
+      if (lobbyHoldRef.current.zone === zone) {
+        lobbyHoldRef.current.time += dt
+        if (lobbyHoldRef.current.time >= 0.45) {
+          onLobbyGazeZone(zone)
+        }
+      } else {
+        lobbyHoldRef.current = { zone, time: 0 }
+      }
+      return
+    }
+
+    dwellRef.current[zone] += dt
     if (zone !== lastZoneRef.current) {
       lastZoneRef.current = zone
       onZoneChange(zone)
@@ -1037,7 +1150,6 @@ interface VRStageProps {
   language?: AppLanguage
   captionsEnabled?: boolean
   pairingCode?: string | null
-  /** When true (Quest / WebXR headset detected), boots straight into 3D Floating VR Lobby */
   headsetBootMode?: boolean
   onSwitchTo2DWeb?: () => void
   onBackToPreFlight?: () => void
@@ -1067,6 +1179,8 @@ export function VRStage({
     return [{ id: 'default-topic-1', title: activeSetup.title, brief: false }]
   }, [activeSetup.title, activeSetup.topics])
 
+  const seats = useMemo(() => computeVenueSeats(activeSetup.venue), [activeSetup.venue])
+
   const totalLimitSeconds = Math.max(60, activeSetup.timeLimitMinutes * 60)
   const isInterview = activeSetup.practiceType === 'interview'
 
@@ -1077,6 +1191,21 @@ export function VRStage({
     pairingCode && pairingCode.length === 4 ? pairingCode : generateHeadsetLobbyCode(),
   )
   const [lobbyPairingStatus, setLobbyPairingStatus] = useState<'waiting' | 'paired'>('waiting')
+
+  // S2.1 In-VR Pre-Flight Checklist State
+  const [lobbyMicPassed, setLobbyMicPassed] = useState(false)
+  const [lobbyGazeCalibrated, setLobbyGazeCalibrated] = useState({
+    left: false,
+    centre: false,
+    right: false,
+  })
+  const [lobbyTriggerTested, setLobbyTriggerTested] = useState(false)
+
+  // Audio & Camera Comfort Height State
+  const [musicEnabled, setMusicEnabled] = useState<boolean>(() => vrAudioEngine.isMusicEnabled())
+  const [seatedHeightMode, setSeatedHeightMode] = useState(false)
+  const [autoHeightOffset, setAutoHeightOffset] = useState(0)
+
   const [sessionId, setSessionId] = useState<string>(() => createSessionId())
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0)
   const [coveredIds, setCoveredIds] = useState<Set<string>>(() =>
@@ -1084,7 +1213,7 @@ export function VRStage({
   )
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
-  const [panelVisible, setPanelVisible] = useState(false)
+  const [panelVisible, setPanelVisible] = useState(true)
   const [desktopControlsOpen, setDesktopControlsOpen] = useState(false)
   const [hintUsed, setHintUsed] = useState(false)
   const [liveCaption, setLiveCaption] = useState(hudT.captionReady)
@@ -1094,13 +1223,41 @@ export function VRStage({
   const [xrNotice, setXrNotice] = useState<string | null>(null)
   const [micSnap, setMicSnap] = useState<VRMicSnapshot>(() => vrMicManager.getSnapshot())
   const autoEnterAttemptedRef = useRef(false)
+  const oneMinWarnedRef = useRef(false)
+  const distractionCounterRef = useRef(0)
 
   useEffect(() => {
-    return vrMicManager.subscribe(setMicSnap)
+    const unsubMic = vrMicManager.subscribe(setMicSnap)
+    const unsubMusic = vrAudioEngine.subscribeMusic(setMusicEnabled)
+    return () => {
+      unsubMic()
+      unsubMusic()
+      vrAudioEngine.stopAll()
+    }
   }, [])
 
-  // Headset Boot Mode: attempt zero-click auto-entry into immersive-vr (works in Quest WebXR PWAs);
-  // if regular Quest Browser blocks it awaiting a gesture, the 1-tap dark splash handles entry.
+  // Manage Lobby Music, Room Ambience & Pause Muting automatically across phases
+  useEffect(() => {
+    if (isPaused) {
+      vrAudioEngine.pauseAll()
+      return
+    }
+    if (phase === 'vr_lobby') {
+      vrAudioEngine.stopRoomAmbience()
+      vrAudioEngine.startLobbyMusic()
+    } else if (phase === 'active') {
+      vrAudioEngine.stopLobbyMusic(0.75)
+      vrAudioEngine.startRoomAmbience(activeSetup.venue)
+    } else if (phase === 'debrief') {
+      vrAudioEngine.stopRoomAmbience()
+      vrAudioEngine.stopLobbyMusic(0.4)
+      vrAudioEngine.playApplause()
+    } else {
+      vrAudioEngine.stopAll()
+    }
+  }, [activeSetup.venue, isPaused, phase])
+
+  // Headset Boot Mode: attempt zero-click auto-entry into immersive-vr
   useEffect(() => {
     if (!headsetBootMode || autoEnterAttemptedRef.current) return
     autoEnterAttemptedRef.current = true
@@ -1108,9 +1265,12 @@ export function VRStage({
       if (xrStore.getState().session) return
       void xrStore
         .enterVR()
-        .then(() => vrMicManager.resumeAudioContext())
+        .then(() => {
+          void vrMicManager.resumeAudioContext()
+          void vrAudioEngine.resume()
+        })
         .catch(() => {
-          // Regular browser requires user gesture — 1-tap full-screen splash is already visible
+          // Regular browser requires user gesture — 1-tap full-screen splash handles entry
         })
     }, 120)
     return () => window.clearTimeout(timer)
@@ -1153,18 +1313,35 @@ export function VRStage({
 
   const remainingSeconds = Math.max(0, totalLimitSeconds - elapsedSeconds)
 
+  // S2.4 1-Minute Warning chime (fires once when hitting 60s remaining)
+  useEffect(() => {
+    if (
+      phase === 'active' &&
+      !isPaused &&
+      activeSetup.oneMinWarning &&
+      remainingSeconds === 60 &&
+      !oneMinWarnedRef.current
+    ) {
+      oneMinWarnedRef.current = true
+      vrAudioEngine.playOneMinuteWarning()
+    }
+  }, [activeSetup.oneMinWarning, isPaused, phase, remainingSeconds])
+
   const handleUIHoverChange = useCallback((hovered: boolean) => {
     uiHoveredCountRef.current = Math.max(0, uiHoveredCountRef.current + (hovered ? 1 : -1))
   }, [])
 
-  /**
-   * Gesture-initiated VR entry:
-   * 1. Requests microphone permission & unlocks AudioContext inside the click gesture
-   *    BEFORE the WebXR session takes over.
-   * 2. Strictly enters `'immersive-vr'` via `xrStore.enterVR()`.
-   */
+  const handleCalibrateGaze = useCallback((zone: GazeZone) => {
+    setLobbyGazeCalibrated((prev) => {
+      if (prev[zone]) return prev
+      vrAudioEngine.playClick()
+      return { ...prev, [zone]: true }
+    })
+  }, [])
+
   const handleEnterVR = useCallback(() => {
     setXrNotice(null)
+    vrAudioEngine.unlock()
     const alreadyActive = vrMicManager.getSnapshot().status === 'active'
     const micPromise = vrMicManager.requestMicFromGesture()
 
@@ -1172,6 +1349,7 @@ export function VRStage({
       try {
         await xrStore.enterVR()
         await vrMicManager.resumeAudioContext()
+        await vrAudioEngine.resume()
       } catch {
         setXrNotice(
           language === 'fr'
@@ -1184,7 +1362,6 @@ export function VRStage({
     if (alreadyActive) {
       void launchImmersiveVR()
     } else {
-      // Wait briefly if mic resolves fast (already granted), otherwise enter VR cleanly
       void Promise.race([
         micPromise,
         new Promise<void>((resolve) => window.setTimeout(resolve, 350)),
@@ -1193,6 +1370,7 @@ export function VRStage({
   }, [language])
 
   const handleExitVR = useCallback(() => {
+    vrAudioEngine.stopAll()
     const session = xrStore.getState().session
     if (session) {
       void session.end().catch(() => {})
@@ -1262,7 +1440,6 @@ export function VRStage({
     topics.length,
   ])
 
-  // Start optional audio recording reusing the gesture-acquired mic stream
   useEffect(() => {
     if (phase === 'active') {
       const existingStream = vrMicManager.getStream()
@@ -1271,15 +1448,14 @@ export function VRStage({
       }
     } else {
       audioRecorderRef.current.stop()
-      stopTTS()
+      vrAudioEngine.stopSpeech()
     }
     return () => {
       audioRecorderRef.current.stop()
-      stopTTS()
+      vrAudioEngine.stopSpeech()
     }
   }, [phase, micSnap.status])
 
-  // Session timer & Q&A answer timer
   useEffect(() => {
     if (phase !== 'active' || isPaused) return
     const timer = window.setInterval(() => {
@@ -1289,7 +1465,7 @@ export function VRStage({
     return () => window.clearInterval(timer)
   }, [activeQuestion, isPaused, phase])
 
-  // 30-second auto-save to Supabase `sessions` & `flagged_moments` (FR-18, NFR-08)
+  // 30-second auto-save to Supabase (FR-18, NFR-08)
   useEffect(() => {
     if (phase !== 'active' || isPaused || elapsedSeconds === 0 || elapsedSeconds % 30 !== 0) {
       return
@@ -1305,20 +1481,29 @@ export function VRStage({
 
   const triggerQuestion = useCallback(() => {
     const activeTopic = topics[currentSlideIndex]
+    const speakerIdx = qaCountRef.current
     const question = generateAudienceQuestion(
       activeSetup,
       activeTopic,
       currentSlideIndex,
       language,
-      qaCountRef.current,
+      speakerIdx,
     )
     qaCountRef.current += 1
-    const seatCount = getSeatCount(activeSetup.venue)
-    setHandRaisedIndex(Math.floor(seatCount * 0.25))
+    const seatIdx = Math.min(seats.length - 1, Math.floor(seats.length * 0.25) + (speakerIdx % Math.max(1, Math.min(5, seats.length))))
+    const askingSeat = seats[seatIdx]
+    const pan = askingSeat ? Math.max(-0.8, Math.min(0.8, askingSeat.x / 3.2)) : 0
+
+    setHandRaisedIndex(seatIdx)
     setActiveQuestion(question)
     setAnswerSeconds(0)
     setLiveCaption(`${question.speakerLabel}: “${question.text}”`)
-    speakQuestionTTS(question.text, language)
+
+    vrAudioEngine.playHandRaiseChime(pan)
+    window.setTimeout(() => {
+      vrAudioEngine.speakAudienceVoice(question.text, language, speakerIdx)
+    }, 280)
+
     addFlag('question', `${question.speakerLabel}: ${question.topicTitle}`, {
       transcriptExcerpt: question.text,
       aiTip:
@@ -1327,7 +1512,7 @@ export function VRStage({
           : 'Aim to answer in under 45 seconds with one concrete example, then bridge back to your slide.',
       slideIndex: currentSlideIndex,
     })
-  }, [activeSetup, addFlag, currentSlideIndex, language, topics])
+  }, [activeSetup, addFlag, currentSlideIndex, language, seats, topics])
 
   // Automatic contextual Q&A interruptions at configured interruptionLevel rate
   useEffect(() => {
@@ -1349,6 +1534,46 @@ export function VRStage({
       triggerQuestion()
     }
   }, [activeQuestion, activeSetup.interruptionLevel, elapsedSeconds, isPaused, phase, triggerQuestion])
+
+  // S2.4 Distracted Audience & Room Interruption Stereo SFX Engine
+  useEffect(() => {
+    if (phase !== 'active' || isPaused || activeQuestion !== null || elapsedSeconds === 0) {
+      return
+    }
+    const isDistracted = activeSetup.audienceBehaviour === 'distracted'
+    const cadence = isDistracted ? 18 : activeSetup.interruptionLevel === 'high' ? 24 : 38
+    if (elapsedSeconds % cadence !== 0) return
+
+    const idx = distractionCounterRef.current
+    distractionCounterRef.current += 1
+    const pan = idx % 2 === 0 ? -0.62 : 0.62
+
+    const eventKind = idx % 5
+    if (eventKind === 0) {
+      vrAudioEngine.playPhoneBuzz(pan)
+    } else if (eventKind === 1) {
+      vrAudioEngine.playWhisperBurst(pan)
+    } else if (eventKind === 2) {
+      vrAudioEngine.playThroatClear(pan)
+    } else if (eventKind === 3) {
+      vrAudioEngine.playLateArrival(pan)
+    } else if (isDistracted) {
+      const verbalLine =
+        language === 'fr'
+          ? 'Excusez-moi, pouvez-vous répéter la dernière partie ?'
+          : 'Sorry, can you repeat the last part?'
+      setLiveCaption(`Audience: “${verbalLine}”`)
+      vrAudioEngine.speakAudienceVoice(verbalLine, language, idx)
+    }
+  }, [
+    activeQuestion,
+    activeSetup.audienceBehaviour,
+    activeSetup.interruptionLevel,
+    elapsedSeconds,
+    isPaused,
+    language,
+    phase,
+  ])
 
   const handleIngestTranscript = useCallback(
     (text: string) => {
@@ -1473,7 +1698,7 @@ export function VRStage({
   }, [currentSlideIndex, goToSlide])
 
   const handleReturnToSlide = useCallback(() => {
-    stopTTS()
+    vrAudioEngine.stopSpeech()
     setActiveQuestion(null)
     setAnswerSeconds(0)
     setHandRaisedIndex(null)
@@ -1487,7 +1712,7 @@ export function VRStage({
       setActiveQuestion(followUp)
       setAnswerSeconds(0)
       setLiveCaption(`${followUp.speakerLabel}: “${followUp.text}”`)
-      speakQuestionTTS(followUp.text, language)
+      vrAudioEngine.speakAudienceVoice(followUp.text, language, qaCountRef.current)
     } else {
       handleReturnToSlide()
     }
@@ -1502,6 +1727,8 @@ export function VRStage({
     slideEnteredAtRef.current = 0
     simSpeechIndexRef.current = 0
     qaCountRef.current = 0
+    oneMinWarnedRef.current = false
+    distractionCounterRef.current = 0
     setSessionId(createSessionId())
     setCurrentSlideIndex(safeSlide)
     setCoveredIds(targetTopics[safeSlide] ? new Set([targetTopics[safeSlide].id]) : new Set())
@@ -1521,7 +1748,7 @@ export function VRStage({
   }
 
   const handleEndSessionToDebrief = async () => {
-    stopTTS()
+    vrAudioEngine.stopSpeech()
     setIsPaused(false)
     const finalRecord = snapshotCurrentRecord()
     await saveSessionSnapshot(userId, finalRecord)
@@ -1553,6 +1780,7 @@ export function VRStage({
     activeSetup.title,
     activeTopic,
     nextTopic,
+    topics,
     currentSlideIndex,
     topics.length,
     isInterview,
@@ -1566,6 +1794,7 @@ export function VRStage({
     activeSetup.title,
     activeTopic,
     nextTopic,
+    topics,
     currentSlideIndex,
     topics.length,
     isInterview,
@@ -1581,7 +1810,7 @@ export function VRStage({
         setup={activeSetup}
         language={language}
         onEnterSession={() => {
-          // Request mic inside the exact user click gesture before stage/VR entry
+          vrAudioEngine.unlock()
           void vrMicManager.requestMicFromGesture()
           setPhase('active')
         }}
@@ -1590,9 +1819,7 @@ export function VRStage({
     )
   }
 
-  // On desktop (not in XR), show the rich HTML Quick Debrief screen.
-  // Inside XR, keep Canvas mounted and render VRDebriefPanel3D so we never drop the XR session!
-  if (phase === 'debrief' && completedRecord && !isXRPresenting) {
+  if (phase === 'debrief' && completedRecord && !isXRPresenting && !headsetBootMode) {
     return (
       <VRQuickDebrief
         record={completedRecord}
@@ -1616,18 +1843,35 @@ export function VRStage({
     activeSetup.venue === 'interview_room' || activeSetup.venue === 'panel_room'
   const isVRLobby = phase === 'vr_lobby'
 
-  // Podium HUD mounted flush onto angled 35° podium top or waist-height floating console
   const podiumHudPosition: [number, number, number] = isTableVenue
     ? [0, 0.97, -0.82]
-    : [0, 1.075, -0.64]
+    : [0, 1.08, -0.64]
   const podiumHudRotation: [number, number, number] = [-0.96, 0, 0]
 
-  // Direct synchronous 1-tap handler for Quest Browser fallback splash
+  // Player Y offset: 0m standing on stage floor, +0.35m in Seated mode (or +0.25m auto-lift if tracked low)
+  const playerOriginY = seatedHeightMode ? 0.35 : autoHeightOffset
+
+  const askingSeat =
+    handRaisedIndex !== null && seats[handRaisedIndex] ? seats[handRaisedIndex] : null
+  const showOneMinWarning =
+    phase === 'active' &&
+    activeSetup.oneMinWarning &&
+    remainingSeconds <= 60
+  const questionsRemaining = Math.max(
+    0,
+    (activeSetup.interruptionLevel === 'high' ? 4 : activeSetup.interruptionLevel === 'medium' ? 3 : 2) -
+      qaCountRef.current,
+  )
+
   const handleHeadsetSplashTap = () => {
+    vrAudioEngine.unlock()
     void vrMicManager.requestMicFromGesture()
     void xrStore
       .enterVR()
-      .then(() => vrMicManager.resumeAudioContext())
+      .then(() => {
+        void vrMicManager.resumeAudioContext()
+        void vrAudioEngine.resume()
+      })
       .catch(() => {
         setXrNotice(
           language === 'fr'
@@ -1683,7 +1927,7 @@ export function VRStage({
         </div>
       )}
 
-      {/* Browser/Desktop HUD shell (never shown in headsetBootMode or inside WebXR) */}
+      {/* Browser/Desktop HUD shell */}
       {!headsetBootMode && !isXRPresenting && (
         <PresenterHUD
           setup={activeSetup}
@@ -1753,150 +1997,194 @@ export function VRStage({
         }}
       >
         <XR store={xrStore}>
-          {/* Player floor origin at (0, 0, 0) facing -Z; headset tracks real eye height */}
-          <XROrigin position={[0, 0, 0]} />
+          {/* Standing on stage floor (y = 0) with optional Seated (+0.35m) / low-tracking comfort lift */}
+          <XROrigin position={[0, playerOriginY, 0]} />
 
           <XRAudioAndTriggerBridge
-            isPaused={isPaused || isVRLobby}
+            isPaused={isPaused}
+            isVRLobby={isVRLobby}
+            seatedHeightMode={seatedHeightMode}
             uiHoveredCountRef={uiHoveredCountRef}
             onPrevSlide={handlePrevSlide}
             onNextSlide={handleNextSlide}
+            onLobbyTriggerTest={() => {
+              vrAudioEngine.playClick()
+              setLobbyTriggerTested(true)
+            }}
+            onAutoHeightOffsetChange={setAutoHeightOffset}
+          />
+          <LobbyMicCheckWatcher
+            active={isVRLobby}
+            alreadyPassed={lobbyMicPassed}
+            onPass={() => setLobbyMicPassed(true)}
           />
           <DesktopMouseLook
             isPaused={isPaused}
             onXRPresentingChange={setIsXRPresenting}
           />
           <CameraGazeTracker
-            isPaused={isPaused || isVRLobby}
+            isPaused={isPaused}
+            isVRLobby={isVRLobby}
             dwellRef={gazeDwellRef}
             onZoneChange={setGazeZone}
+            onLobbyGazeZone={handleCalibrateGaze}
           />
 
-          {/* Opaque deep architectural background + atmospheric depth fog */}
-          <color attach="background" args={['#090d16']} />
-          <fog
-            attach="fog"
-            args={['#090d16', isVRLobby ? 6 : dim.fogNear, isVRLobby ? 18 : dim.fogFar]}
+          {/* Opaque background (no dark oppressive fog!) */}
+          <color
+            attach="background"
+            args={[isVRLobby ? '#1e293b' : activeSetup.venue === 'auditorium' ? '#334155' : '#dfe5ec']}
           />
 
-          {/* Atmospheric Venue Lighting Rig (low draw-call, Quest 3 72+ FPS) */}
-          <ambientLight intensity={0.38} color="#cbd5e1" />
-          <hemisphereLight args={['#1e293b', '#0f172a', 0.28]} />
-          {/* Warm overhead stage & podium spotlight */}
-          <spotLight
-            position={[0, isVRLobby ? 3.9 : dim.height - 0.15, isVRLobby ? -0.8 : -0.35]}
-            angle={0.68}
-            penumbra={0.72}
-            intensity={2.8}
-            color="#fff1dc"
-            distance={12}
-            decay={1.5}
+          {/* Bright, Natural Architectural Lighting Rig */}
+          <hemisphereLight args={['#f8fafc', '#94a3b8', 1.35]} />
+          <ambientLight intensity={0.85} color="#ffffff" />
+          <directionalLight position={[2.5, 6.0, 2.5]} intensity={1.7} color="#fff8eb" />
+          <pointLight
+            position={[0, isVRLobby ? 3.8 : dim.height - 0.35, -1.2]}
+            intensity={2.0}
+            color="#fff7e6"
+            distance={18}
+            decay={1.4}
           />
 
           {isVRLobby ? (
             <>
-              {/* Sleek Dark Enclosed VR Lobby + Curved-Arc 3D Floating Spatial Menu */}
               <VRLobbyEnvironment />
               <VRFloatingLobby3D
+                setup={activeSetup}
                 selectedVenue={activeSetup.venue}
                 pairingCode={lobbyPairingCode}
                 pairingStatus={lobbyPairingStatus}
                 micStatus={micSnap.status}
+                micCheckPassed={lobbyMicPassed}
+                gazeCalibrated={lobbyGazeCalibrated}
+                triggerTested={lobbyTriggerTested}
+                musicEnabled={musicEnabled}
+                seatedHeightMode={seatedHeightMode}
                 language={language}
-                onSelectVenueAndEnter={(venue) => {
-                  const nextSetup: SessionSetup = { ...activeSetup, venue }
-                  resetSessionRun(0, nextSetup)
-                }}
+                onCalibrateGaze={handleCalibrateGaze}
+                onTestTrigger={() => setLobbyTriggerTested(true)}
+                onSelectVenue={(venue) =>
+                  setActiveSetup((prev) => ({ ...prev, venue }))
+                }
                 onStartPractice={() => {
+                  vrAudioEngine.unlock()
                   resetSessionRun(0, activeSetup)
                 }}
                 onRegenerateCode={() => {
                   setLobbyPairingStatus('waiting')
                   setLobbyPairingCode(generateHeadsetLobbyCode())
                 }}
-                onEnableMic={() => void vrMicManager.requestMicFromGesture()}
+                onEnableMic={() => {
+                  vrAudioEngine.unlock()
+                  void vrMicManager.requestMicFromGesture()
+                }}
+                onToggleMusic={() => vrAudioEngine.setMusicEnabled(!musicEnabled)}
+                onToggleHeightMode={() => setSeatedHeightMode((prev) => !prev)}
                 onHoverChange={handleUIHoverChange}
               />
             </>
           ) : (
             <>
-              {/* Soft cool rim lights separating audience from dark back wall */}
+              {/* Soft architectural ceiling fills for audience clarity */}
               <pointLight
-                position={[-dim.width * 0.34, dim.height * 0.72, dim.frontZ + 1.4]}
+                position={[-dim.width * 0.28, dim.height - 0.4, dim.frontZ * 0.55]}
                 intensity={1.6}
-                color="#60a5fa"
-                distance={16}
-                decay={1.8}
+                color="#f8fafc"
+                distance={20}
+                decay={1.5}
               />
               <pointLight
-                position={[dim.width * 0.34, dim.height * 0.72, dim.frontZ + 1.4]}
+                position={[dim.width * 0.28, dim.height - 0.4, dim.frontZ * 0.55]}
                 intensity={1.6}
-                color="#818cf8"
-                distance={16}
-                decay={1.8}
+                color="#f8fafc"
+                distance={20}
+                decay={1.5}
               />
 
-              {/* Enclosed Architectural Venue Geometry */}
+              {/* Bright Enclosed Architectural Venue */}
               <VenueArchitecture venue={activeSetup.venue} />
 
-              {/* Main Virtual Projector Screen on Front Wall */}
+              {/* Main Bright In-Room Projector Screen (separated +0.16m from Front Wall, face +0.03m from bezel) */}
               <group
                 position={
                   isTableVenue
-                    ? [0, 2.05, dim.frontZ + 0.12]
-                    : [0, Math.min(dim.height - 1.15, 2.95), dim.frontZ + 0.14]
+                    ? [0, 2.05, dim.frontZ + 0.16]
+                    : [0, Math.min(dim.height - 1.15, 2.95), dim.frontZ + 0.18]
                 }
               >
-                {/* Dark aluminum bezel frame */}
-                <mesh position={[0, 0, -0.02]}>
+                <mesh position={[0, 0, 0]}>
                   <boxGeometry
                     args={
                       activeSetup.venue === 'auditorium'
-                        ? [4.52, 2.32, 0.04]
+                        ? [4.62, 2.36, 0.04]
                         : isTableVenue
-                          ? [2.32, 1.22, 0.04]
-                          : [3.32, 1.72, 0.04]
+                          ? [2.36, 1.24, 0.04]
+                          : [3.38, 1.76, 0.04]
                     }
                   />
-                  <meshStandardMaterial color="#0f172a" roughness={0.4} metalness={0.6} />
+                  <meshStandardMaterial color="#1e293b" roughness={0.4} metalness={0.45} />
                 </mesh>
-                <mesh>
+                <mesh position={[0, 0, 0.03]}>
                   <planeGeometry
                     args={
                       activeSetup.venue === 'auditorium'
-                        ? [4.4, 2.2]
+                        ? [4.48, 2.24]
                         : isTableVenue
-                          ? [2.2, 1.1]
-                          : [3.2, 1.6]
+                          ? [2.24, 1.12]
+                          : [3.24, 1.62]
                     }
                   />
-                  <meshBasicMaterial map={projectorTexture} />
+                  <meshBasicMaterial
+                    map={projectorTexture}
+                    polygonOffset
+                    polygonOffsetFactor={-1}
+                  />
                 </mesh>
               </group>
 
-              {/* Confidence Floor Monitor at Stage Apron (for presentation venues) */}
+              {/* Confidence Floor Monitor at Stage Apron */}
               {!isTableVenue && (
-                <group position={[0, 0.28, -1.78]} rotation={[-0.48, 0, 0]}>
-                  <mesh position={[0, 0, -0.025]}>
-                    <boxGeometry args={[1.18, 0.62, 0.04]} />
-                    <meshStandardMaterial color="#0f172a" roughness={0.45} metalness={0.5} />
+                <group position={[0, 0.30, -1.78]} rotation={[-0.48, 0, 0]}>
+                  <mesh position={[0, 0, 0]}>
+                    <boxGeometry args={[1.20, 0.64, 0.04]} />
+                    <meshStandardMaterial color="#1e293b" roughness={0.45} metalness={0.45} />
                   </mesh>
-                  <mesh>
+                  <mesh position={[0, 0, 0.03]}>
                     <planeGeometry args={[1.12, 0.56]} />
-                    <meshBasicMaterial map={confidenceTexture} />
+                    <meshBasicMaterial
+                      map={confidenceTexture}
+                      polygonOffset
+                      polygonOffsetFactor={-1}
+                    />
                   </mesh>
                 </group>
               )}
 
-              {/* Instanced Human-Proportioned Audience / Interviewers */}
+              {/* Organic Human-Proportioned Audience / Interviewers */}
               <InstancedAudience
-                venue={activeSetup.venue}
+                seats={seats}
                 behaviour={activeSetup.audienceBehaviour}
                 isPaused={isPaused}
                 handRaisedIndex={handRaisedIndex}
               />
 
-              {/* World-Space Interactive 3D Presenter HUD mounted on Podium / Console */}
+              {/* S2.3 Floating Speech Bubble above asking student/interviewer */}
+              {phase === 'active' && activeQuestion && askingSeat && !isPaused && (
+                <VRQuestionBubble3D
+                  position={[askingSeat.x, askingSeat.floorY + 1.88, askingSeat.z]}
+                  question={activeQuestion}
+                />
+              )}
+
+              {/* S2.4 Crisp 1-Minute Warning Banner */}
+              <VROneMinWarningBanner3D
+                visible={showOneMinWarning && !isPaused}
+                timeUp={remainingSeconds === 0}
+              />
+
+              {/* World-Space Interactive 3D Podium Console */}
               {phase === 'active' && (
                 <VRPodiumHUD
                   position={podiumHudPosition}
@@ -1931,39 +2219,50 @@ export function VRStage({
                 />
               )}
 
-              {/* World-Space Toggleable Outline & Live Q&A Console */}
+              {/* S2.2 / S2.2b / S2.3 Private Presenter Panel ("🔒 Only you see this") */}
               {phase === 'active' && (
                 <VRTeleprompterBoard
                   visible={panelVisible}
+                  setup={activeSetup}
                   language={language}
                   topics={topics}
                   currentSlideIndex={currentSlideIndex}
                   coveredIds={coveredIds}
+                  elapsedSeconds={elapsedSeconds}
                   activeQuestion={activeQuestion}
                   answerSeconds={answerSeconds}
+                  questionsRemaining={questionsRemaining}
                   followUpsEnabled={activeSetup.followUps}
                   onJumpToSlide={goToSlide}
                   onFinishAnswer={handleFinishAnswer}
                   onReturnToSlide={handleReturnToSlide}
+                  onTogglePanel={() => setPanelVisible((prev) => !prev)}
                   onHoverChange={handleUIHoverChange}
                 />
               )}
 
-              {/* World-Space 3D Pause / Venue Switcher / Pairing / Exit Menu */}
+              {/* S2.5 / S2.5b Pause Menu */}
               {phase === 'active' && (
                 <VRPauseMenu3D
                   visible={isPaused}
                   setup={activeSetup}
                   language={language}
+                  elapsedSeconds={elapsedSeconds}
                   pairingCode={pairingCode ?? lobbyPairingCode}
                   currentTopicTitle={activeTopic?.title ?? activeSetup.title}
                   micStatus={micSnap.status}
+                  panelVisible={panelVisible}
                   hintUsed={hintUsed}
+                  musicEnabled={musicEnabled}
+                  seatedHeightMode={seatedHeightMode}
                   isXRPresenting={isXRPresenting}
                   onSelectVenue={(venue) =>
                     setActiveSetup((prev) => ({ ...prev, venue }))
                   }
                   onRetryMic={() => void vrMicManager.requestMicFromGesture()}
+                  onToggleMusic={() => vrAudioEngine.setMusicEnabled(!musicEnabled)}
+                  onToggleHeightMode={() => setSeatedHeightMode((prev) => !prev)}
+                  onTogglePanel={() => setPanelVisible((prev) => !prev)}
                   onUseHint={handleUseHint}
                   onResume={() => setIsPaused(false)}
                   onRestartCurrentSlide={() => {
@@ -1977,8 +2276,8 @@ export function VRStage({
                 />
               )}
 
-              {/* World-Space 3D Quick Debrief inside VR so finishing never kills XR */}
-              {phase === 'debrief' && completedRecord && isXRPresenting && (
+              {/* S2.6 Session Complete / Quick Debrief inside VR */}
+              {phase === 'debrief' && completedRecord && (isXRPresenting || headsetBootMode) && (
                 <VRDebriefPanel3D
                   record={completedRecord}
                   language={language}
@@ -1993,6 +2292,10 @@ export function VRStage({
                     } else if (onBackToPreFlight) {
                       onBackToPreFlight()
                     }
+                  }}
+                  onExitToLobby={() => {
+                    setCompletedRecord(null)
+                    setPhase('vr_lobby')
                   }}
                   onHoverChange={handleUIHoverChange}
                 />
