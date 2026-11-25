@@ -59,6 +59,75 @@ function formatClock(totalSeconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
+let uiAudioCtx: AudioContext | null = null
+
+function getUIAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null
+  if (uiAudioCtx && uiAudioCtx.state !== 'closed') {
+    if (uiAudioCtx.state === 'suspended') {
+      void uiAudioCtx.resume().catch(() => {})
+    }
+    return uiAudioCtx
+  }
+  const Ctor =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!Ctor) return null
+  try {
+    uiAudioCtx = new Ctor()
+    return uiAudioCtx
+  } catch {
+    return null
+  }
+}
+
+export function playVRHoverSound(): void {
+  const ctx = getUIAudioContext()
+  if (!ctx || ctx.state !== 'running') return
+  try {
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(860, now)
+    osc.frequency.exponentialRampToValueAtTime(1080, now + 0.032)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.linearRampToValueAtTime(0.028, now + 0.008)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.038)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(now)
+    osc.stop(now + 0.042)
+  } catch {
+    // Ignore Web Audio errors on locked contexts
+  }
+}
+
+export function playVRClickSound(): void {
+  const ctx = getUIAudioContext()
+  if (!ctx) return
+  if (ctx.state === 'suspended') {
+    void ctx.resume().catch(() => {})
+  }
+  try {
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(640, now)
+    osc.frequency.exponentialRampToValueAtTime(980, now + 0.055)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.linearRampToValueAtTime(0.06, now + 0.008)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.075)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(now)
+    osc.stop(now + 0.08)
+  } catch {
+    // Ignore Web Audio errors
+  }
+}
+
 export interface VRButton3DProps {
   position: [number, number, number]
   width: number
@@ -169,6 +238,7 @@ export function VRButton3D({
     if (disabled) return
     setHovered(true)
     onHoverChange?.(true)
+    playVRHoverSound()
     document.body.style.cursor = 'pointer'
   }
 
@@ -184,6 +254,7 @@ export function VRButton3D({
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation()
     if (disabled) return
+    playVRClickSound()
     onClick()
   }
 
@@ -1068,6 +1139,536 @@ export function VRDebriefPanel3D({
         onClick={onExitToReport}
         onHoverChange={onHoverChange}
       />
+    </group>
+  )
+}
+
+/* ==========================================================================
+   3D Floating VR Lobby Menu (Curved Arc at ~1.6m, eye height y = 1.45m)
+   ========================================================================== */
+
+interface VenueCardMeta {
+  id: VenueType
+  icon: string
+  label: string
+  subtitle: string
+  accent: string
+}
+
+const LOBBY_VENUE_CARDS: VenueCardMeta[] = [
+  { id: 'classroom', icon: '🏫', label: 'Classroom', subtitle: '30 Seats · Intimate', accent: '#38bdf8' },
+  { id: 'lecture_hall', icon: '🎓', label: 'Lecture', subtitle: '60 Seats · Tiered', accent: '#818cf8' },
+  { id: 'auditorium', icon: '🎭', label: 'Auditorium', subtitle: '200 Seats · Keynote', accent: '#c084fc' },
+  { id: 'interview_room', icon: '💼', label: 'Interview', subtitle: '1-on-1 · Focused', accent: '#2dd4bf' },
+  { id: 'panel_room', icon: '🎙', label: 'Panel', subtitle: '3 Panelists · Q&A', accent: '#fbbf24' },
+]
+
+function VRVenueCard3D({
+  card,
+  position,
+  selected,
+  onSelect,
+  onHoverChange,
+}: {
+  card: VenueCardMeta
+  position: [number, number, number]
+  selected: boolean
+  onSelect: () => void
+  onHoverChange: (hovered: boolean) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const width = 0.36
+  const height = 0.27
+
+  const cardGeo = useMemo(() => createRoundedRectGeometry(width, height, 0.022), [])
+  const borderGeo = useMemo(() => createRoundedRectGeometry(width + 0.014, height + 0.014, 0.026), [])
+
+  useEffect(() => {
+    return () => {
+      cardGeo.dispose()
+      borderGeo.dispose()
+    }
+  }, [borderGeo, cardGeo])
+
+  const cardTexture = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 512
+    canvas.height = 384
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }, [])
+
+  useEffect(() => {
+    const canvas = cardTexture.image as HTMLCanvasElement
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // Top accent strip
+    ctx.fillStyle = card.accent
+    ctx.beginPath()
+    ctx.roundRect(24, 20, canvas.width - 48, 12, 6)
+    ctx.fill()
+
+    // Bold venue icon
+    ctx.font = '88px system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(card.icon, canvas.width / 2, 134)
+
+    // Venue name
+    ctx.fillStyle = '#f8fafc'
+    ctx.font = '800 50px Inter, system-ui, sans-serif'
+    ctx.fillText(card.label, canvas.width / 2, 246)
+
+    // Subtitle
+    ctx.fillStyle = '#94a3b8'
+    ctx.font = '600 30px Inter, system-ui, sans-serif'
+    ctx.fillText(card.subtitle, canvas.width / 2, 310)
+
+    cardTexture.needsUpdate = true
+  }, [card.accent, card.icon, card.label, card.subtitle, cardTexture])
+
+  useEffect(() => () => cardTexture.dispose(), [cardTexture])
+
+  const popZ = hovered ? 0.032 : selected ? 0.014 : 0
+  const fillHex = hovered ? '#1e293b' : selected ? '#16233b' : '#0f172a'
+  const glowHex = hovered || selected ? card.accent : '#334155'
+
+  return (
+    <group position={[position[0], position[1], position[2] + popZ]}>
+      {/* Glowing border frame */}
+      <mesh geometry={borderGeo} position={[0, 0, -0.002]}>
+        <meshStandardMaterial
+          color={glowHex}
+          emissive={hovered || selected ? card.accent : '#000000'}
+          emissiveIntensity={hovered ? 1.15 : selected ? 0.55 : 0}
+          roughness={0.35}
+        />
+      </mesh>
+
+      {/* Interactive collider mesh */}
+      <mesh
+        geometry={cardGeo}
+        onPointerOver={(e) => {
+          e.stopPropagation()
+          setHovered(true)
+          onHoverChange(true)
+          playVRHoverSound()
+          document.body.style.cursor = 'pointer'
+        }}
+        onPointerOut={(e) => {
+          e.stopPropagation()
+          if (hovered) {
+            setHovered(false)
+            onHoverChange(false)
+          }
+          document.body.style.cursor = 'auto'
+        }}
+        onClick={(e) => {
+          e.stopPropagation()
+          playVRClickSound()
+          onSelect()
+        }}
+      >
+        <meshStandardMaterial color={fillHex} roughness={0.42} metalness={0.14} />
+      </mesh>
+
+      {/* Crisp icon + text face */}
+      <mesh position={[0, 0, 0.003]}>
+        <planeGeometry args={[width * 0.94, height * 0.92]} />
+        <meshBasicMaterial map={cardTexture} transparent depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
+export interface VRFloatingLobby3DProps {
+  selectedVenue: VenueType
+  pairingCode: string
+  pairingStatus: 'waiting' | 'paired'
+  micStatus: VRMicStatus
+  language: AppLanguage
+  onSelectVenueAndEnter: (venue: VenueType) => void
+  onStartPractice: () => void
+  onRegenerateCode: () => void
+  onEnableMic: () => void
+  onHoverChange: (hovered: boolean) => void
+}
+
+const MIC_EQ_BAR_COUNT = 9
+
+export function VRFloatingLobby3D({
+  selectedVenue,
+  pairingCode,
+  pairingStatus,
+  micStatus,
+  language,
+  onSelectVenueAndEnter,
+  onStartPractice,
+  onRegenerateCode,
+  onEnableMic,
+  onHoverChange,
+}: VRFloatingLobby3DProps) {
+  const isFr = language === 'fr'
+
+  // Panel backing geometries
+  const centerPanelGeo = useMemo(() => createRoundedRectGeometry(1.26, 0.78, 0.036), [])
+  const sidePanelGeo = useMemo(() => createRoundedRectGeometry(0.64, 0.72, 0.032), [])
+
+  useEffect(() => {
+    return () => {
+      centerPanelGeo.dispose()
+      sidePanelGeo.dispose()
+    }
+  }, [centerPanelGeo, sidePanelGeo])
+
+  // Center Header Texture
+  const centerHeaderTex = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1024
+    canvas.height = 160
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }, [])
+
+  useEffect(() => {
+    const canvas = centerHeaderTex.image as HTMLCanvasElement
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.fillStyle = '#5eead4'
+    ctx.font = '700 28px Inter, system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('STAGERA VR', canvas.width / 2, 42)
+    ctx.fillStyle = '#f8fafc'
+    ctx.font = '800 50px Inter, system-ui, sans-serif'
+    ctx.fillText(
+      isFr ? 'Choisissez votre salle' : 'Select a Practice Venue',
+      canvas.width / 2,
+      108,
+    )
+    centerHeaderTex.needsUpdate = true
+  }, [centerHeaderTex, isFr])
+
+  useEffect(() => () => centerHeaderTex.dispose(), [centerHeaderTex])
+
+  // Left Pairing Panel Texture
+  const pairingTex = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 640
+    canvas.height = 540
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }, [])
+
+  useEffect(() => {
+    const canvas = pairingTex.image as HTMLCanvasElement
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.fillStyle = '#090f1d'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // Top accent
+    ctx.fillStyle = pairingStatus === 'paired' ? '#10b981' : '#38bdf8'
+    ctx.fillRect(0, 0, canvas.width, 12)
+
+    ctx.textAlign = 'center'
+    ctx.fillStyle = '#94a3b8'
+    ctx.font = '700 26px Inter, system-ui, sans-serif'
+    ctx.fillText(
+      isFr ? 'JUMELAGE TÉLÉPHONE' : 'PHONE COMPANION PAIRING',
+      canvas.width / 2,
+      68,
+    )
+
+    // Large 4-digit pairing code box
+    ctx.fillStyle = '#111c33'
+    ctx.beginPath()
+    ctx.roundRect(56, 114, canvas.width - 112, 178, 22)
+    ctx.fill()
+    ctx.strokeStyle = pairingStatus === 'paired' ? '#34d399' : '#38bdf8'
+    ctx.lineWidth = 4
+    ctx.stroke()
+
+    const spacedCode = pairingCode.split('').join(' ')
+    ctx.fillStyle = '#f8fafc'
+    ctx.font = '800 108px monospace'
+    ctx.fillText(spacedCode, canvas.width / 2, 238)
+
+    // Live status pill
+    const pillBg = pairingStatus === 'paired' ? '#065f46' : '#1e293b'
+    const dotColor = pairingStatus === 'paired' ? '#34d399' : '#fbbf24'
+    const statusText =
+      pairingStatus === 'paired'
+        ? isFr
+          ? 'Jumelé · Lancement...'
+          : 'Paired · Launching...'
+        : isFr
+          ? 'En attente du téléphone...'
+          : 'Waiting for Phone...'
+
+    ctx.fillStyle = pillBg
+    ctx.beginPath()
+    ctx.roundRect(86, 332, canvas.width - 172, 66, 33)
+    ctx.fill()
+
+    ctx.fillStyle = dotColor
+    ctx.beginPath()
+    ctx.arc(132, 365, 11, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.fillStyle = '#f8fafc'
+    ctx.font = '700 28px Inter, system-ui, sans-serif'
+    ctx.fillText(statusText, canvas.width / 2 + 16, 375)
+
+    ctx.fillStyle = '#64748b'
+    ctx.font = '500 22px Inter, system-ui, sans-serif'
+    ctx.fillText(
+      isFr
+        ? 'Entrez ce code dans Stagera sur mobile'
+        : 'Enter this code in Stagera Companion',
+      canvas.width / 2,
+      462,
+    )
+
+    pairingTex.needsUpdate = true
+  }, [isFr, pairingCode, pairingStatus, pairingTex])
+
+  useEffect(() => () => pairingTex.dispose(), [pairingTex])
+
+  // Right Mic & Quick Start Panel Texture
+  const micHeaderTex = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 640
+    canvas.height = 240
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }, [])
+
+  useEffect(() => {
+    const canvas = micHeaderTex.image as HTMLCanvasElement
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.fillStyle = '#090f1d'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.fillStyle =
+      micStatus === 'active'
+        ? '#10b981'
+        : micStatus === 'denied' || micStatus === 'unsupported'
+          ? '#ef4444'
+          : '#0ea5e9'
+    ctx.fillRect(0, 0, canvas.width, 12)
+
+    ctx.textAlign = 'center'
+    ctx.fillStyle = '#94a3b8'
+    ctx.font = '700 26px Inter, system-ui, sans-serif'
+    ctx.fillText(isFr ? 'AUDIO & DÉMARRAGE' : 'MICROPHONE & QUICK START', canvas.width / 2, 68)
+
+    const pillBg =
+      micStatus === 'active'
+        ? '#065f46'
+        : micStatus === 'denied' || micStatus === 'unsupported'
+          ? '#7f1d1d'
+          : '#1e293b'
+    const label =
+      micStatus === 'active'
+        ? '● MIC LIVE'
+        : micStatus === 'denied' || micStatus === 'unsupported'
+          ? '⚠ MIC BLOCKED'
+          : '● MIC STANDBY'
+
+    ctx.fillStyle = pillBg
+    ctx.beginPath()
+    ctx.roundRect(130, 108, canvas.width - 260, 62, 31)
+    ctx.fill()
+
+    ctx.fillStyle = '#f8fafc'
+    ctx.font = '700 28px Inter, system-ui, sans-serif'
+    ctx.fillText(label, canvas.width / 2, 149)
+
+    ctx.fillStyle = '#64748b'
+    ctx.font = '500 22px Inter, system-ui, sans-serif'
+    ctx.fillText(
+      micStatus === 'active'
+        ? isFr
+          ? 'Parlez pour tester le niveau micro'
+          : 'Speak now to verify live audio level'
+        : isFr
+          ? 'Activez le micro pour le coaching vocal'
+          : 'Enable mic for live voice coaching',
+      canvas.width / 2,
+      214,
+    )
+
+    micHeaderTex.needsUpdate = true
+  }, [isFr, micHeaderTex, micStatus])
+
+  useEffect(() => () => micHeaderTex.dispose(), [micHeaderTex])
+
+  // Live 9-bar 3D Mic Equalizer Visualizer (zero React re-renders)
+  const barRefs = useRef<Array<THREE.Mesh | null>>([])
+  const barMatRefs = useRef<Array<THREE.MeshStandardMaterial | null>>([])
+
+  useFrame(({ clock }) => {
+    const level = vrMicManager.sampleLevel()
+    const t = clock.getElapsedTime()
+    for (let i = 0; i < MIC_EQ_BAR_COUNT; i++) {
+      const mesh = barRefs.current[i]
+      const mat = barMatRefs.current[i]
+      if (!mesh || !mat) continue
+
+      const centerWeight = 1 - Math.abs(i - (MIC_EQ_BAR_COUNT - 1) / 2) / 5.2
+      const wave = 0.72 + 0.28 * Math.sin(t * 7.5 + i * 0.9)
+      const idleBreath = 0.08 + 0.04 * Math.sin(t * 2.2 + i * 0.6)
+      const h =
+        micStatus === 'active'
+          ? Math.max(0.08, Math.min(1, idleBreath + level * centerWeight * wave * 1.45))
+          : 0.08
+
+      mesh.scale.y = h
+      mesh.position.y = -0.09 + (h * 0.16) / 2
+
+      if (micStatus === 'denied' || micStatus === 'unsupported') {
+        mat.color.set('#ef4444')
+        mat.emissive.set('#b91c1c')
+      } else if (h > 0.75) {
+        mat.color.set('#fbbf24')
+        mat.emissive.set('#d97706')
+      } else if (micStatus === 'active' && level > 0.05) {
+        mat.color.set('#34d399')
+        mat.emissive.set('#059669')
+      } else {
+        mat.color.set('#38bdf8')
+        mat.emissive.set('#0284c7')
+      }
+    }
+  })
+
+  // 3-top / 2-bottom layout for the 5 venue cards in the center floating panel
+  const cardPositions: [number, number, number][] = [
+    [-0.39, 0.09, 0.014],
+    [0, 0.09, 0.014],
+    [0.39, 0.09, 0.014],
+    [-0.20, -0.21, 0.014],
+    [0.20, -0.21, 0.014],
+  ]
+
+  return (
+    <group>
+      {/* CENTER FLOATING PANEL: 5 Interactive Venue Cards (~1.6m away, eye height y = 1.45m) */}
+      <group position={[0, 1.45, -1.60]}>
+        <mesh geometry={centerPanelGeo}>
+          <meshStandardMaterial color="#090f1d" roughness={0.45} metalness={0.22} />
+        </mesh>
+        <mesh position={[0, 0.30, 0.006]}>
+          <planeGeometry args={[1.16, 0.16]} />
+          <meshBasicMaterial map={centerHeaderTex} transparent depthWrite={false} />
+        </mesh>
+
+        {LOBBY_VENUE_CARDS.map((card, idx) => (
+          <VRVenueCard3D
+            key={card.id}
+            card={card}
+            position={cardPositions[idx]}
+            selected={selectedVenue === card.id}
+            onSelect={() => onSelectVenueAndEnter(card.id)}
+            onHoverChange={onHoverChange}
+          />
+        ))}
+      </group>
+
+      {/* LEFT FLOATING PANEL: 4-Digit Phone Pairing Code + Live Status */}
+      <group position={[-1.08, 1.45, -1.32]} rotation={[0, 0.48, 0]}>
+        <mesh geometry={sidePanelGeo}>
+          <meshStandardMaterial color="#090f1d" roughness={0.45} metalness={0.22} />
+        </mesh>
+        <mesh position={[0, 0.06, 0.006]}>
+          <planeGeometry args={[0.58, 0.49]} />
+          <meshBasicMaterial map={pairingTex} />
+        </mesh>
+        <VRButton3D
+          position={[0, -0.265, 0.012]}
+          width={0.46}
+          height={0.082}
+          label={isFr ? '↻ Nouveau code' : '↻ New Pairing Code'}
+          variant="secondary"
+          onClick={onRegenerateCode}
+          onHoverChange={onHoverChange}
+        />
+      </group>
+
+      {/* RIGHT FLOATING PANEL: Live 3D Mic Visualizer + Quick Start Practice */}
+      <group position={[1.08, 1.45, -1.32]} rotation={[0, -0.48, 0]}>
+        <mesh geometry={sidePanelGeo}>
+          <meshStandardMaterial color="#090f1d" roughness={0.45} metalness={0.22} />
+        </mesh>
+
+        <mesh position={[0, 0.21, 0.006]}>
+          <planeGeometry args={[0.58, 0.22]} />
+          <meshBasicMaterial map={micHeaderTex} />
+        </mesh>
+
+        {/* Equalizer backing tray */}
+        <mesh position={[0, -0.01, 0.005]}>
+          <planeGeometry args={[0.54, 0.19]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.75} />
+        </mesh>
+
+        {/* 9 Live Animated 3D Mic Equalizer Bars */}
+        {Array.from({ length: MIC_EQ_BAR_COUNT }, (_, i) => {
+          const x = -0.21 + i * 0.0525
+          return (
+            <mesh
+              key={i}
+              ref={(el) => {
+                barRefs.current[i] = el
+              }}
+              position={[x, -0.08, 0.012]}
+            >
+              <boxGeometry args={[0.032, 0.16, 0.012]} />
+              <meshStandardMaterial
+                ref={(el) => {
+                  barMatRefs.current[i] = el
+                }}
+                color="#38bdf8"
+                emissive="#0284c7"
+                emissiveIntensity={0.85}
+                roughness={0.3}
+              />
+            </mesh>
+          )
+        })}
+
+        {micStatus !== 'active' && (
+          <VRButton3D
+            position={[0, -0.165, 0.012]}
+            width={0.50}
+            height={0.072}
+            label={isFr ? '🎙 Activer le micro' : '🎙 Enable Microphone'}
+            variant="accent"
+            onClick={onEnableMic}
+            onHoverChange={onHoverChange}
+          />
+        )}
+
+        <VRButton3D
+          position={[0, -0.265, 0.012]}
+          width={0.50}
+          height={0.092}
+          label={isFr ? '▶ Lancer la séance' : '▶ Start Practice'}
+          variant="primary"
+          onClick={onStartPractice}
+          onHoverChange={onHoverChange}
+        />
+      </group>
     </group>
   )
 }

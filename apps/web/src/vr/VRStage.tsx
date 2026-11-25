@@ -15,6 +15,10 @@ import {
 } from '../ai/speechAnalyzer'
 import { translations } from '../lib/i18n'
 import {
+  generateHeadsetLobbyCode,
+  subscribeHeadsetLobbyPairing,
+} from '../lib/pairing'
+import {
   buildSessionRecord,
   createSessionId,
   OptionalAudioRecorder,
@@ -39,18 +43,20 @@ import { VRLobbyCheck } from './VRLobbyCheck'
 import { VRQuickDebrief } from './VRQuickDebrief'
 import {
   VRDebriefPanel3D,
+  VRFloatingLobby3D,
   VRPauseMenu3D,
   VRPodiumHUD,
   VRTeleprompterBoard,
 } from './VRWorldUI'
 
 /**
- * Pure Full VR store — explicitly kills Mixed Reality / Passthrough (`immersive-ar`)
- * and disables AR-only features (plane/mesh detection, hitTest, anchors, domOverlay).
+ * Pure Full VR store — explicitly disables `offerSession` (prevents `InvalidStateError`
+ * on Meta Quest Browser when entering VR via custom button and kills `immersive-ar`)
+ * and disables all AR-only features (plane/mesh detection, hitTest, anchors, domOverlay).
  * `bounded: undefined` enforces `requiredFeatures: ['local-floor']` so physical floor = y: 0.
  */
 const xrStore = createXRStore({
-  offerSession: 'immersive-vr',
+  offerSession: false,
   enterGrantedSession: ['immersive-vr'],
   emulate: false,
   bounded: undefined,
@@ -66,7 +72,7 @@ const xrStore = createXRStore({
 })
 
 type GazeZone = 'left' | 'centre' | 'right'
-type StagePhase = 'lobby' | 'active' | 'debrief'
+type StagePhase = 'lobby' | 'vr_lobby' | 'active' | 'debrief'
 
 interface SeatTransform {
   x: number
@@ -518,6 +524,59 @@ function getRoomDimensions(venue: VenueType): RoomDimensions {
     case 'auditorium':
       return { width: 22.0, depth: 19.6, height: 5.0, frontZ: -16.8, backZ: 2.8, fogNear: 14, fogFar: 36 }
   }
+}
+
+/**
+ * Enclosed sleek dark VR Lobby chamber (10m × 10m × 4.2m) with subtle glowing
+ * concentric floor rings so Quest users land in a rich native-feeling VR space
+ * with zero passthrough bleed-through.
+ */
+function VRLobbyEnvironment() {
+  return (
+    <group>
+      {/* Floor at y = 0 */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <planeGeometry args={[12, 12]} />
+        <meshStandardMaterial color="#0b1120" roughness={0.85} metalness={0.12} />
+      </mesh>
+      {/* Subtle concentric glowing floor rings */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0]}>
+        <ringGeometry args={[1.42, 1.46, 64]} />
+        <meshStandardMaterial color="#14b8a6" emissive="#0d9488" emissiveIntensity={1.1} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0]}>
+        <ringGeometry args={[2.45, 2.48, 64]} />
+        <meshStandardMaterial color="#38bdf8" emissive="#0284c7" emissiveIntensity={0.7} />
+      </mesh>
+      {/* Ceiling */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 4.2, 0]}>
+        <planeGeometry args={[12, 12]} />
+        <meshStandardMaterial color="#070b14" roughness={0.95} />
+      </mesh>
+      {/* Enclosed 4 walls */}
+      <mesh position={[0, 2.1, -6]}>
+        <planeGeometry args={[12, 4.2]} />
+        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+      </mesh>
+      <mesh position={[0, 2.1, 6]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[12, 4.2]} />
+        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+      </mesh>
+      <mesh position={[-6, 2.1, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[12, 4.2]} />
+        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+      </mesh>
+      <mesh position={[6, 2.1, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[12, 4.2]} />
+        <meshStandardMaterial color="#0f172a" roughness={0.92} />
+      </mesh>
+      {/* Soft overhead halo light ring */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 4.15, -1.2]}>
+        <ringGeometry args={[1.6, 1.66, 64]} />
+        <meshStandardMaterial color="#e0f2fe" emissive="#38bdf8" emissiveIntensity={0.9} />
+      </mesh>
+    </group>
+  )
 }
 
 /**
@@ -978,6 +1037,9 @@ interface VRStageProps {
   language?: AppLanguage
   captionsEnabled?: boolean
   pairingCode?: string | null
+  /** When true (Quest / WebXR headset detected), boots straight into 3D Floating VR Lobby */
+  headsetBootMode?: boolean
+  onSwitchTo2DWeb?: () => void
   onBackToPreFlight?: () => void
   onEndSession?: (record: SessionRecord) => void
 }
@@ -988,6 +1050,8 @@ export function VRStage({
   language = 'en',
   captionsEnabled = true,
   pairingCode = null,
+  headsetBootMode = false,
+  onSwitchTo2DWeb,
   onBackToPreFlight,
   onEndSession,
 }: VRStageProps) {
@@ -1006,7 +1070,13 @@ export function VRStage({
   const totalLimitSeconds = Math.max(60, activeSetup.timeLimitMinutes * 60)
   const isInterview = activeSetup.practiceType === 'interview'
 
-  const [phase, setPhase] = useState<StagePhase>('lobby')
+  const [phase, setPhase] = useState<StagePhase>(() =>
+    headsetBootMode ? 'vr_lobby' : 'lobby',
+  )
+  const [lobbyPairingCode, setLobbyPairingCode] = useState<string>(() =>
+    pairingCode && pairingCode.length === 4 ? pairingCode : generateHeadsetLobbyCode(),
+  )
+  const [lobbyPairingStatus, setLobbyPairingStatus] = useState<'waiting' | 'paired'>('waiting')
   const [sessionId, setSessionId] = useState<string>(() => createSessionId())
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0)
   const [coveredIds, setCoveredIds] = useState<Set<string>>(() =>
@@ -1023,10 +1093,42 @@ export function VRStage({
   const [isXRPresenting, setIsXRPresenting] = useState(false)
   const [xrNotice, setXrNotice] = useState<string | null>(null)
   const [micSnap, setMicSnap] = useState<VRMicSnapshot>(() => vrMicManager.getSnapshot())
+  const autoEnterAttemptedRef = useRef(false)
 
   useEffect(() => {
     return vrMicManager.subscribe(setMicSnap)
   }, [])
+
+  // Headset Boot Mode: attempt zero-click auto-entry into immersive-vr (works in Quest WebXR PWAs);
+  // if regular Quest Browser blocks it awaiting a gesture, the 1-tap dark splash handles entry.
+  useEffect(() => {
+    if (!headsetBootMode || autoEnterAttemptedRef.current) return
+    autoEnterAttemptedRef.current = true
+    const timer = window.setTimeout(() => {
+      if (xrStore.getState().session) return
+      void xrStore
+        .enterVR()
+        .then(() => vrMicManager.resumeAudioContext())
+        .catch(() => {
+          // Regular browser requires user gesture — 1-tap full-screen splash is already visible
+        })
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [headsetBootMode])
+
+  // Subscribe 3D Floating VR Lobby to incoming phone pairing launches via Supabase Realtime
+  useEffect(() => {
+    if (phase !== 'vr_lobby') return
+    setLobbyPairingStatus('waiting')
+    const unsubscribe = subscribeHeadsetLobbyPairing(lobbyPairingCode, (phoneSetup) => {
+      setLobbyPairingStatus('paired')
+      setActiveSetup(phoneSetup)
+      window.setTimeout(() => {
+        setPhase('active')
+      }, 450)
+    })
+    return unsubscribe
+  }, [lobbyPairingCode, phase])
 
   // Speech delivery, Q&A, Auto-flagging & Debrief state
   const analyzerRef = useRef<SpeechDeliveryAnalyzer>(new SpeechDeliveryAnalyzer())
@@ -1512,6 +1614,7 @@ export function VRStage({
   const dim = getRoomDimensions(activeSetup.venue)
   const isTableVenue =
     activeSetup.venue === 'interview_room' || activeSetup.venue === 'panel_room'
+  const isVRLobby = phase === 'vr_lobby'
 
   // Podium HUD mounted flush onto angled 35° podium top or waist-height floating console
   const podiumHudPosition: [number, number, number] = isTableVenue
@@ -1519,10 +1622,69 @@ export function VRStage({
     : [0, 1.075, -0.64]
   const podiumHudRotation: [number, number, number] = [-0.96, 0, 0]
 
+  // Direct synchronous 1-tap handler for Quest Browser fallback splash
+  const handleHeadsetSplashTap = () => {
+    void vrMicManager.requestMicFromGesture()
+    void xrStore
+      .enterVR()
+      .then(() => vrMicManager.resumeAudioContext())
+      .catch(() => {
+        setXrNotice(
+          language === 'fr'
+            ? 'Appuyez à nouveau pour entrer en VR.'
+            : 'Tap once more to launch Stagera VR.',
+        )
+      })
+  }
+
   return (
-    <div className="vr-stage-container">
-      {/* Browser/Desktop HUD shell (hidden inside WebXR; inside VR everything is 3D world-space) */}
-      {!isXRPresenting && (
+    <div className={`vr-stage-container ${headsetBootMode ? 'vr-stage-headset-full' : ''}`}>
+      {/* Headset 1-Tap Full-Screen Dark Fallback Splash (zero flat menus or navbars) */}
+      {headsetBootMode && !isXRPresenting && (
+        <div
+          id="vr-headset-tap-splash"
+          className="vr-headset-splash"
+          role="button"
+          tabIndex={0}
+          onClick={handleHeadsetSplashTap}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              handleHeadsetSplashTap()
+            }
+          }}
+        >
+          <div className="vr-headset-splash-inner">
+            <span className="vr-headset-splash-mark" aria-hidden="true">
+              S
+            </span>
+            <h1 className="vr-headset-splash-title">Stagera VR</h1>
+            <p className="vr-headset-splash-prompt">
+              {language === 'fr'
+                ? 'Appuyez ou pressez la gâchette n’importe où pour entrer dans Stagera VR'
+                : 'Tap / Pull Trigger Anywhere to Enter Stagera VR'}
+            </p>
+            {xrNotice && <p className="vr-headset-splash-notice">{xrNotice}</p>}
+          </div>
+
+          {onSwitchTo2DWeb && (
+            <button
+              id="vr-switch-2d-btn"
+              type="button"
+              className="vr-headset-escape-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                onSwitchTo2DWeb()
+              }}
+            >
+              {language === 'fr' ? 'Passer en vue web 2D' : 'Switch to 2D Web View'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Browser/Desktop HUD shell (never shown in headsetBootMode or inside WebXR) */}
+      {!headsetBootMode && !isXRPresenting && (
         <PresenterHUD
           setup={activeSetup}
           language={language}
@@ -1562,7 +1724,7 @@ export function VRStage({
         />
       )}
 
-      {isPaused && !isXRPresenting && (
+      {isPaused && !headsetBootMode && !isXRPresenting && (
         <PauseMenu
           language={language}
           coachedMode={activeSetup.coachedMode}
@@ -1595,7 +1757,7 @@ export function VRStage({
           <XROrigin position={[0, 0, 0]} />
 
           <XRAudioAndTriggerBridge
-            isPaused={isPaused}
+            isPaused={isPaused || isVRLobby}
             uiHoveredCountRef={uiHoveredCountRef}
             onPrevSlide={handlePrevSlide}
             onNextSlide={handleNextSlide}
@@ -1605,21 +1767,24 @@ export function VRStage({
             onXRPresentingChange={setIsXRPresenting}
           />
           <CameraGazeTracker
-            isPaused={isPaused}
+            isPaused={isPaused || isVRLobby}
             dwellRef={gazeDwellRef}
             onZoneChange={setGazeZone}
           />
 
           {/* Opaque deep architectural background + atmospheric depth fog */}
           <color attach="background" args={['#090d16']} />
-          <fog attach="fog" args={['#090d16', dim.fogNear, dim.fogFar]} />
+          <fog
+            attach="fog"
+            args={['#090d16', isVRLobby ? 6 : dim.fogNear, isVRLobby ? 18 : dim.fogFar]}
+          />
 
           {/* Atmospheric Venue Lighting Rig (low draw-call, Quest 3 72+ FPS) */}
-          <ambientLight intensity={0.35} color="#cbd5e1" />
+          <ambientLight intensity={0.38} color="#cbd5e1" />
           <hemisphereLight args={['#1e293b', '#0f172a', 0.28]} />
           {/* Warm overhead stage & podium spotlight */}
           <spotLight
-            position={[0, dim.height - 0.15, -0.35]}
+            position={[0, isVRLobby ? 3.9 : dim.height - 0.15, isVRLobby ? -0.8 : -0.35]}
             angle={0.68}
             penumbra={0.72}
             intensity={2.8}
@@ -1627,182 +1792,212 @@ export function VRStage({
             distance={12}
             decay={1.5}
           />
-          {/* Soft cool rim lights separating audience from dark back wall */}
-          <pointLight
-            position={[-dim.width * 0.34, dim.height * 0.72, dim.frontZ + 1.4]}
-            intensity={1.6}
-            color="#60a5fa"
-            distance={16}
-            decay={1.8}
-          />
-          <pointLight
-            position={[dim.width * 0.34, dim.height * 0.72, dim.frontZ + 1.4]}
-            intensity={1.6}
-            color="#818cf8"
-            distance={16}
-            decay={1.8}
-          />
 
-          {/* Enclosed Architectural Venue Geometry */}
-          <VenueArchitecture venue={activeSetup.venue} />
-
-          {/* Main Virtual Projector Screen on Front Wall */}
-          <group
-            position={
-              isTableVenue
-                ? [0, 2.05, dim.frontZ + 0.12]
-                : [0, Math.min(dim.height - 1.15, 2.95), dim.frontZ + 0.14]
-            }
-          >
-            {/* Dark aluminum bezel frame */}
-            <mesh position={[0, 0, -0.02]}>
-              <boxGeometry
-                args={
-                  activeSetup.venue === 'auditorium'
-                    ? [4.52, 2.32, 0.04]
-                    : isTableVenue
-                      ? [2.32, 1.22, 0.04]
-                      : [3.32, 1.72, 0.04]
-                }
+          {isVRLobby ? (
+            <>
+              {/* Sleek Dark Enclosed VR Lobby + Curved-Arc 3D Floating Spatial Menu */}
+              <VRLobbyEnvironment />
+              <VRFloatingLobby3D
+                selectedVenue={activeSetup.venue}
+                pairingCode={lobbyPairingCode}
+                pairingStatus={lobbyPairingStatus}
+                micStatus={micSnap.status}
+                language={language}
+                onSelectVenueAndEnter={(venue) => {
+                  const nextSetup: SessionSetup = { ...activeSetup, venue }
+                  resetSessionRun(0, nextSetup)
+                }}
+                onStartPractice={() => {
+                  resetSessionRun(0, activeSetup)
+                }}
+                onRegenerateCode={() => {
+                  setLobbyPairingStatus('waiting')
+                  setLobbyPairingCode(generateHeadsetLobbyCode())
+                }}
+                onEnableMic={() => void vrMicManager.requestMicFromGesture()}
+                onHoverChange={handleUIHoverChange}
               />
-              <meshStandardMaterial color="#0f172a" roughness={0.4} metalness={0.6} />
-            </mesh>
-            <mesh>
-              <planeGeometry
-                args={
-                  activeSetup.venue === 'auditorium'
-                    ? [4.4, 2.2]
-                    : isTableVenue
-                      ? [2.2, 1.1]
-                      : [3.2, 1.6]
-                }
+            </>
+          ) : (
+            <>
+              {/* Soft cool rim lights separating audience from dark back wall */}
+              <pointLight
+                position={[-dim.width * 0.34, dim.height * 0.72, dim.frontZ + 1.4]}
+                intensity={1.6}
+                color="#60a5fa"
+                distance={16}
+                decay={1.8}
               />
-              <meshBasicMaterial map={projectorTexture} />
-            </mesh>
-          </group>
+              <pointLight
+                position={[dim.width * 0.34, dim.height * 0.72, dim.frontZ + 1.4]}
+                intensity={1.6}
+                color="#818cf8"
+                distance={16}
+                decay={1.8}
+              />
 
-          {/* Confidence Floor Monitor at Stage Apron (for presentation venues) */}
-          {!isTableVenue && (
-            <group position={[0, 0.28, -1.78]} rotation={[-0.48, 0, 0]}>
-              <mesh position={[0, 0, -0.025]}>
-                <boxGeometry args={[1.18, 0.62, 0.04]} />
-                <meshStandardMaterial color="#0f172a" roughness={0.45} metalness={0.5} />
-              </mesh>
-              <mesh>
-                <planeGeometry args={[1.12, 0.56]} />
-                <meshBasicMaterial map={confidenceTexture} />
-              </mesh>
-            </group>
-          )}
+              {/* Enclosed Architectural Venue Geometry */}
+              <VenueArchitecture venue={activeSetup.venue} />
 
-          {/* Instanced Human-Proportioned Audience / Interviewers */}
-          <InstancedAudience
-            venue={activeSetup.venue}
-            behaviour={activeSetup.audienceBehaviour}
-            isPaused={isPaused}
-            handRaisedIndex={handRaisedIndex}
-          />
-
-          {/* World-Space Interactive 3D Presenter HUD mounted on Podium / Console */}
-          {phase === 'active' && (
-            <VRPodiumHUD
-              position={podiumHudPosition}
-              rotation={podiumHudRotation}
-              setup={activeSetup}
-              language={language}
-              topics={topics}
-              currentSlideIndex={currentSlideIndex}
-              elapsedSeconds={elapsedSeconds}
-              remainingSeconds={remainingSeconds}
-              liveWpm={liveWpm}
-              liveFillers={liveFillers}
-              captionsEnabled={captionsEnabled}
-              liveCaption={liveCaption}
-              micStatus={micSnap.status}
-              micError={micSnap.errorMessage}
-              panelVisible={panelVisible}
-              isPaused={isPaused}
-              hasActiveQuestion={activeQuestion !== null}
-              onPrevSlide={handlePrevSlide}
-              onNextSlide={handleNextSlide}
-              onToggleQA={() => {
-                if (activeQuestion) {
-                  handleFinishAnswer()
-                } else {
-                  triggerQuestion()
+              {/* Main Virtual Projector Screen on Front Wall */}
+              <group
+                position={
+                  isTableVenue
+                    ? [0, 2.05, dim.frontZ + 0.12]
+                    : [0, Math.min(dim.height - 1.15, 2.95), dim.frontZ + 0.14]
                 }
-              }}
-              onTogglePanel={() => setPanelVisible((prev) => !prev)}
-              onTogglePause={() => setIsPaused((prev) => !prev)}
-              onHoverChange={handleUIHoverChange}
-            />
-          )}
+              >
+                {/* Dark aluminum bezel frame */}
+                <mesh position={[0, 0, -0.02]}>
+                  <boxGeometry
+                    args={
+                      activeSetup.venue === 'auditorium'
+                        ? [4.52, 2.32, 0.04]
+                        : isTableVenue
+                          ? [2.32, 1.22, 0.04]
+                          : [3.32, 1.72, 0.04]
+                    }
+                  />
+                  <meshStandardMaterial color="#0f172a" roughness={0.4} metalness={0.6} />
+                </mesh>
+                <mesh>
+                  <planeGeometry
+                    args={
+                      activeSetup.venue === 'auditorium'
+                        ? [4.4, 2.2]
+                        : isTableVenue
+                          ? [2.2, 1.1]
+                          : [3.2, 1.6]
+                    }
+                  />
+                  <meshBasicMaterial map={projectorTexture} />
+                </mesh>
+              </group>
 
-          {/* World-Space Toggleable Outline & Live Q&A Console */}
-          {phase === 'active' && (
-            <VRTeleprompterBoard
-              visible={panelVisible}
-              language={language}
-              topics={topics}
-              currentSlideIndex={currentSlideIndex}
-              coveredIds={coveredIds}
-              activeQuestion={activeQuestion}
-              answerSeconds={answerSeconds}
-              followUpsEnabled={activeSetup.followUps}
-              onJumpToSlide={goToSlide}
-              onFinishAnswer={handleFinishAnswer}
-              onReturnToSlide={handleReturnToSlide}
-              onHoverChange={handleUIHoverChange}
-            />
-          )}
+              {/* Confidence Floor Monitor at Stage Apron (for presentation venues) */}
+              {!isTableVenue && (
+                <group position={[0, 0.28, -1.78]} rotation={[-0.48, 0, 0]}>
+                  <mesh position={[0, 0, -0.025]}>
+                    <boxGeometry args={[1.18, 0.62, 0.04]} />
+                    <meshStandardMaterial color="#0f172a" roughness={0.45} metalness={0.5} />
+                  </mesh>
+                  <mesh>
+                    <planeGeometry args={[1.12, 0.56]} />
+                    <meshBasicMaterial map={confidenceTexture} />
+                  </mesh>
+                </group>
+              )}
 
-          {/* World-Space 3D Pause / Venue Switcher / Pairing / Exit Menu */}
-          {phase === 'active' && (
-            <VRPauseMenu3D
-              visible={isPaused}
-              setup={activeSetup}
-              language={language}
-              pairingCode={pairingCode}
-              currentTopicTitle={activeTopic?.title ?? activeSetup.title}
-              micStatus={micSnap.status}
-              hintUsed={hintUsed}
-              isXRPresenting={isXRPresenting}
-              onSelectVenue={(venue) =>
-                setActiveSetup((prev) => ({ ...prev, venue }))
-              }
-              onRetryMic={() => void vrMicManager.requestMicFromGesture()}
-              onUseHint={handleUseHint}
-              onResume={() => setIsPaused(false)}
-              onRestartCurrentSlide={() => {
-                setIsPaused(false)
-                setLiveCaption(hudT.captionReady)
-              }}
-              onRestartBeginning={() => resetSessionRun(0)}
-              onEndSession={() => void handleEndSessionToDebrief()}
-              onExitVR={handleExitVR}
-              onHoverChange={handleUIHoverChange}
-            />
-          )}
+              {/* Instanced Human-Proportioned Audience / Interviewers */}
+              <InstancedAudience
+                venue={activeSetup.venue}
+                behaviour={activeSetup.audienceBehaviour}
+                isPaused={isPaused}
+                handRaisedIndex={handRaisedIndex}
+              />
 
-          {/* World-Space 3D Quick Debrief inside VR so finishing never kills XR */}
-          {phase === 'debrief' && completedRecord && isXRPresenting && (
-            <VRDebriefPanel3D
-              record={completedRecord}
-              language={language}
-              onTryAgain={() => resetSessionRun(0)}
-              onRaiseDifficulty={() =>
-                resetSessionRun(0, raiseDifficultySetup(activeSetup))
-              }
-              onExitToReport={() => {
-                handleExitVR()
-                if (onEndSession) {
-                  onEndSession(completedRecord)
-                } else if (onBackToPreFlight) {
-                  onBackToPreFlight()
-                }
-              }}
-              onHoverChange={handleUIHoverChange}
-            />
+              {/* World-Space Interactive 3D Presenter HUD mounted on Podium / Console */}
+              {phase === 'active' && (
+                <VRPodiumHUD
+                  position={podiumHudPosition}
+                  rotation={podiumHudRotation}
+                  setup={activeSetup}
+                  language={language}
+                  topics={topics}
+                  currentSlideIndex={currentSlideIndex}
+                  elapsedSeconds={elapsedSeconds}
+                  remainingSeconds={remainingSeconds}
+                  liveWpm={liveWpm}
+                  liveFillers={liveFillers}
+                  captionsEnabled={captionsEnabled}
+                  liveCaption={liveCaption}
+                  micStatus={micSnap.status}
+                  micError={micSnap.errorMessage}
+                  panelVisible={panelVisible}
+                  isPaused={isPaused}
+                  hasActiveQuestion={activeQuestion !== null}
+                  onPrevSlide={handlePrevSlide}
+                  onNextSlide={handleNextSlide}
+                  onToggleQA={() => {
+                    if (activeQuestion) {
+                      handleFinishAnswer()
+                    } else {
+                      triggerQuestion()
+                    }
+                  }}
+                  onTogglePanel={() => setPanelVisible((prev) => !prev)}
+                  onTogglePause={() => setIsPaused((prev) => !prev)}
+                  onHoverChange={handleUIHoverChange}
+                />
+              )}
+
+              {/* World-Space Toggleable Outline & Live Q&A Console */}
+              {phase === 'active' && (
+                <VRTeleprompterBoard
+                  visible={panelVisible}
+                  language={language}
+                  topics={topics}
+                  currentSlideIndex={currentSlideIndex}
+                  coveredIds={coveredIds}
+                  activeQuestion={activeQuestion}
+                  answerSeconds={answerSeconds}
+                  followUpsEnabled={activeSetup.followUps}
+                  onJumpToSlide={goToSlide}
+                  onFinishAnswer={handleFinishAnswer}
+                  onReturnToSlide={handleReturnToSlide}
+                  onHoverChange={handleUIHoverChange}
+                />
+              )}
+
+              {/* World-Space 3D Pause / Venue Switcher / Pairing / Exit Menu */}
+              {phase === 'active' && (
+                <VRPauseMenu3D
+                  visible={isPaused}
+                  setup={activeSetup}
+                  language={language}
+                  pairingCode={pairingCode ?? lobbyPairingCode}
+                  currentTopicTitle={activeTopic?.title ?? activeSetup.title}
+                  micStatus={micSnap.status}
+                  hintUsed={hintUsed}
+                  isXRPresenting={isXRPresenting}
+                  onSelectVenue={(venue) =>
+                    setActiveSetup((prev) => ({ ...prev, venue }))
+                  }
+                  onRetryMic={() => void vrMicManager.requestMicFromGesture()}
+                  onUseHint={handleUseHint}
+                  onResume={() => setIsPaused(false)}
+                  onRestartCurrentSlide={() => {
+                    setIsPaused(false)
+                    setLiveCaption(hudT.captionReady)
+                  }}
+                  onRestartBeginning={() => resetSessionRun(0)}
+                  onEndSession={() => void handleEndSessionToDebrief()}
+                  onExitVR={handleExitVR}
+                  onHoverChange={handleUIHoverChange}
+                />
+              )}
+
+              {/* World-Space 3D Quick Debrief inside VR so finishing never kills XR */}
+              {phase === 'debrief' && completedRecord && isXRPresenting && (
+                <VRDebriefPanel3D
+                  record={completedRecord}
+                  language={language}
+                  onTryAgain={() => resetSessionRun(0)}
+                  onRaiseDifficulty={() =>
+                    resetSessionRun(0, raiseDifficultySetup(activeSetup))
+                  }
+                  onExitToReport={() => {
+                    handleExitVR()
+                    if (onEndSession) {
+                      onEndSession(completedRecord)
+                    } else if (onBackToPreFlight) {
+                      onBackToPreFlight()
+                    }
+                  }}
+                  onHoverChange={handleUIHoverChange}
+                />
+              )}
+            </>
           )}
         </XR>
       </Canvas>

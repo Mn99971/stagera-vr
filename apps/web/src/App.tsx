@@ -14,7 +14,36 @@ import type { AppLanguage, SessionRecord, SessionSetup } from './types/stagera'
 import { VRPreFlight } from './vr/VRPreFlight'
 import { VRStage } from './vr/VRStage'
 
+const DEFAULT_HEADSET_SETUP: SessionSetup = {
+  id: 'headset-quick-lobby',
+  title: 'Stagera VR Live Session',
+  practiceType: 'presentation',
+  venue: 'auditorium',
+  audienceBehaviour: 'attentive',
+  interruptionLevel: 'low',
+  followUps: true,
+  questionsAtEnd: true,
+  unexpectedQuestions: false,
+  timeLimitMinutes: 5,
+  oneMinWarning: true,
+  coachedMode: false,
+  goals: ['steady_pace', 'keep_eye_contact'],
+  topics: [
+    { id: 't1', title: 'Opening Hook & Vision', brief: false },
+    { id: 't2', title: 'Core Problem & Opportunity', brief: false },
+    { id: 't3', title: 'Product Demo & Key Metrics', brief: false },
+    { id: 't4', title: 'Audience Q&A & Closing', brief: false },
+  ],
+}
+
+function hasVRHeadsetUA(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /OculusBrowser|Quest/i.test(navigator.userAgent)
+}
+
 export function App() {
+  const [isHeadset, setIsHeadset] = useState<boolean>(() => hasVRHeadsetUA())
+  const [forceWeb2D, setForceWeb2D] = useState(false)
   const [step, setStep] = useState<'setup' | 'vr' | 'report'>('setup')
   const [userId, setUserId] = useState<string | undefined>(undefined)
   const [activeSetup, setActiveSetup] = useState<SessionSetup | null>(null)
@@ -23,6 +52,23 @@ export function App() {
   const [selectedReport, setSelectedReport] = useState<SessionRecord | null>(null)
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [language, setLanguage] = useState<AppLanguage>(() => getStoredLanguage())
+
+  // Detect any WebXR immersive-vr capable headset asynchronously (instant UA hint already prevents 2D flash on Quest)
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.xr?.isSessionSupported) return
+    let active = true
+    void navigator.xr
+      .isSessionSupported('immersive-vr')
+      .then((supported) => {
+        if (active && supported) {
+          setIsHeadset(true)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     document.documentElement.lang = language
@@ -68,6 +114,30 @@ export function App() {
     await deleteAllRecordings(userId)
     setAllSessions([])
     setSelectedReport(null)
+  }
+
+  // VR Headset Direct Boot: bypass flat Step 1/2/3 web UI completely and mount 3D Floating VR Lobby
+  if (isHeadset && !forceWeb2D) {
+    return (
+      <div className="stagera-headset-root">
+        <VRStage
+          setup={activeSetup ?? DEFAULT_HEADSET_SETUP}
+          userId={userId}
+          language={language}
+          captionsEnabled={captionsEnabled}
+          pairingCode={activePairingCode}
+          headsetBootMode={true}
+          onSwitchTo2DWeb={() => setForceWeb2D(true)}
+          onEndSession={(record) => {
+            setAllSessions((prev) => [
+              record,
+              ...prev.filter((item) => item.id !== record.id),
+            ])
+            setSelectedReport(record)
+          }}
+        />
+      </div>
+    )
   }
 
   const t = translations[language].app
