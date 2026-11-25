@@ -89,29 +89,47 @@ export function SessionReportScreen({
         </div>
       </div>
 
-      {/* S3.1b Goal-First Feedback (shown first when goals are configured) */}
-      {(record.goals.length > 0 || isInterview) && (
+      {/* S3.1b Goal-First Feedback (prefers real DeepSeek AI goal feedback when present) */}
+      {(record.aiFeedback?.goalFeedback.length || record.goals.length > 0 || isInterview) && (
         <section className="dash-card" aria-label={t.goalsHeading}>
           <h2 className="dash-card-title" style={{ marginBottom: 10 }}>
             {t.goalsHeading}
           </h2>
 
-          {record.goals.length > 0 && (
-            <div className="chip-list" style={{ marginBottom: isInterview ? 14 : 0 }}>
-              {record.goals.map((goalId) => {
-                const label =
-                  translations[language].wizard.goalsInterviewer.goalOptions.find(
-                    (g) => g.id === goalId,
-                  )?.label ??
-                  translations[language].profile.goalOptions.find((g) => g.id === goalId)?.label ??
-                  goalId
-                return (
-                  <span key={goalId} className="preview-chip">
-                    ✓ {label}
+          {record.aiFeedback && record.aiFeedback.goalFeedback.length > 0 ? (
+            <div className="debrief-goals-list" style={{ marginBottom: isInterview ? 14 : 0 }}>
+              {record.aiFeedback.goalFeedback.map((item, idx) => (
+                <div key={`${item.goal}-${idx}`} className="debrief-goal-row">
+                  <div>
+                    <p className="setting-title">{item.goal}</p>
+                    <p className="setting-desc">{item.note}</p>
+                  </div>
+                  <span
+                    className={`debrief-goal-badge ${item.status === 'Strong' ? 'met' : 'focus'}`}
+                  >
+                    {item.status}
                   </span>
-                )
-              })}
+                </div>
+              ))}
             </div>
+          ) : (
+            record.goals.length > 0 && (
+              <div className="chip-list" style={{ marginBottom: isInterview ? 14 : 0 }}>
+                {record.goals.map((goalId) => {
+                  const label =
+                    translations[language].wizard.goalsInterviewer.goalOptions.find(
+                      (g) => g.id === goalId,
+                    )?.label ??
+                    translations[language].profile.goalOptions.find((g) => g.id === goalId)?.label ??
+                    goalId
+                  return (
+                    <span key={goalId} className="preview-chip">
+                      ✓ {label}
+                    </span>
+                  )
+                })}
+              </div>
+            )
           )}
 
           {isInterview && (

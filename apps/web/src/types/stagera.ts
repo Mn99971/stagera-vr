@@ -117,6 +117,26 @@ export interface FlaggedMoment {
   recoverySuccessful?: boolean
 }
 
+export interface AIGoalFeedbackItem {
+  goal: string
+  status: 'Strong' | 'Improving' | 'Needs work'
+  note: string
+}
+
+export interface AIFlaggedMomentItem {
+  timestamp: string
+  title: string
+  detail: string
+  aiTip: string
+}
+
+export interface SessionAIFeedback {
+  quickTip: string
+  topRecommendations: string[]
+  goalFeedback: AIGoalFeedbackItem[]
+  flaggedMoments: AIFlaggedMomentItem[]
+}
+
 export interface SessionRecord {
   id: string
   setupId?: string
@@ -139,5 +159,6 @@ export interface SessionRecord {
   recommendations: string[]
   flaggedMoments: FlaggedMoment[]
   goals: string[]
+  aiFeedback?: SessionAIFeedback
   createdAt: string
 }

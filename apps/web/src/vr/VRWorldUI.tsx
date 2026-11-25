@@ -1185,6 +1185,7 @@ export function VRPauseMenu3D({
 export interface VRDebriefPanel3DProps {
   record: SessionRecord
   language: AppLanguage
+  feedbackLoading?: boolean
   onTryAgain: () => void
   onRaiseDifficulty: () => void
   onExitToReport: () => void
@@ -1194,6 +1195,7 @@ export interface VRDebriefPanel3DProps {
 
 export function VRDebriefPanel3D({
   record,
+  feedbackLoading = false,
   onTryAgain,
   onRaiseDifficulty,
   onExitToReport,
@@ -1207,8 +1209,11 @@ export function VRDebriefPanel3D({
     { label: 'Time vs limit', val: formatClock(record.durationSeconds), sub: `/ ${record.timeLimitMinutes}:00` },
   ]
 
-  const topTip =
-    record.recommendations[0] ?? 'Great run! Review your full delivery breakdown on your phone.'
+  const topTip = feedbackLoading
+    ? 'Generating AI coaching tips...'
+    : record.aiFeedback?.quickTip ??
+      record.recommendations[0] ??
+      'Great run! Review your full delivery breakdown on your phone.'
 
   return (
     <group position={[0, 1.48, -1.55]}>
