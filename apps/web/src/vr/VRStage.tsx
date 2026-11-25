@@ -12,6 +12,10 @@ import {
   SpeechDeliveryAnalyzer,
 } from '../ai/speechAnalyzer'
 import { translations } from '../lib/i18n'
+import {
+  applyAIFeedbackToRecord,
+  requestSessionAIFeedback,
+} from '../lib/aiFeedback'
 import { GroqLiveTranscriber } from '../lib/groqTranscriber'
 import {
   generateHeadsetLobbyCode,
@@ -1885,6 +1889,8 @@ export function VRStage({
     return unsubscribe
   }, [lobbyPairingCode, phase, resetSessionRun])
 
+  const [feedbackLoading, setFeedbackLoading] = useState(false)
+
   const handleEndSessionToDebrief = useCallback(async () => {
     groqTranscriberRef.current.stop()
     vrAudioEngine.stopSpeech()
@@ -1894,11 +1900,38 @@ export function VRStage({
     setHandRaisedIndex(null)
     setIsSpeaking(false)
     setIsPaused(false)
-    const finalRecord = snapshotCurrentRecord()
-    await saveSessionSnapshot(userId, finalRecord)
-    setCompletedRecord(finalRecord)
+
+    // Immediately show S2.6 debrief metrics (never block the screen)
+    const initialRecord = snapshotCurrentRecord()
+    setCompletedRecord(initialRecord)
+    setFeedbackLoading(true)
     setPhase('debrief')
-  }, [snapshotCurrentRecord, userId])
+
+    // Save initial snapshot right away
+    void saveSessionSnapshot(userId, initialRecord)
+
+    // Asynchronously fetch real DeepSeek V4.1-Flash coaching feedback & sync enriched record to Supabase
+    const coveredSnapshot = new Set(coveredIds)
+    const setupSnapshot = activeSetup
+    const topicsSnapshot = topics
+    void requestSessionAIFeedback(
+      initialRecord,
+      setupSnapshot,
+      topicsSnapshot,
+      coveredSnapshot,
+    )
+      .then(async (feedback) => {
+        if (!feedback) return
+        const enriched = applyAIFeedbackToRecord(initialRecord, feedback)
+        setCompletedRecord((current) =>
+          current && current.id === initialRecord.id ? enriched : current,
+        )
+        await saveSessionSnapshot(userId, enriched)
+      })
+      .finally(() => {
+        setFeedbackLoading(false)
+      })
+  }, [activeSetup, coveredIds, snapshotCurrentRecord, topics, userId])
 
   const handleExitToLobby = useCallback(() => {
     groqTranscriberRef.current.stop()
@@ -1907,6 +1940,7 @@ export function VRStage({
     vrMicManager.resetVADSession()
     analyzerRef.current.reset()
     uiHoveredCountRef.current = 0
+    setFeedbackLoading(false)
     setCompletedRecord(null)
     setActiveQuestion(null)
     setAnswerSeconds(0)
@@ -2449,6 +2483,7 @@ export function VRStage({
                 <VRDebriefPanel3D
                   record={completedRecord}
                   language={language}
+                  feedbackLoading={feedbackLoading}
                   onTryAgain={() => resetSessionRun(0)}
                   onRaiseDifficulty={() =>
                     resetSessionRun(0, raiseDifficultySetup(activeSetup))

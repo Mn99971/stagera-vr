@@ -91,7 +91,8 @@ export function VRQuickDebrief({
   const homeT = translations[language].home
 
   const primaryFlag: FlaggedMoment | null = record.flaggedMoments[0] ?? null
-  const topRecommendation = record.recommendations[0] ?? ''
+  const topRecommendation =
+    record.aiFeedback?.quickTip ?? record.recommendations[0] ?? ''
   const topFillers = Object.entries(record.fillerBreakdown)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
@@ -157,29 +158,43 @@ export function VRQuickDebrief({
         </div>
       </div>
 
-      {/* Goal-First Feedback (when goals are configured) */}
-      {record.goals.length > 0 && (
+      {/* Goal-First Feedback (prefers real DeepSeek AI goal feedback when available) */}
+      {(record.aiFeedback?.goalFeedback.length || record.goals.length > 0) && (
         <div className="debrief-card">
           <h2 className="dash-card-title" style={{ marginBottom: 10 }}>
             {t.goalFeedbackHeading}
           </h2>
           <div className="debrief-goals-list">
-            {record.goals.slice(0, 3).map((goalId) => {
-              const evalResult = evaluateGoal(goalId, record, language)
-              return (
-                <div key={goalId} className="debrief-goal-row">
-                  <div>
-                    <p className="setting-title">{evalResult.label}</p>
-                    <p className="setting-desc">{evalResult.detail}</p>
+            {record.aiFeedback && record.aiFeedback.goalFeedback.length > 0
+              ? record.aiFeedback.goalFeedback.slice(0, 3).map((item, idx) => (
+                  <div key={`${item.goal}-${idx}`} className="debrief-goal-row">
+                    <div>
+                      <p className="setting-title">{item.goal}</p>
+                      <p className="setting-desc">{item.note}</p>
+                    </div>
+                    <span
+                      className={`debrief-goal-badge ${item.status === 'Strong' ? 'met' : 'focus'}`}
+                    >
+                      {item.status}
+                    </span>
                   </div>
-                  <span
-                    className={`debrief-goal-badge ${evalResult.met ? 'met' : 'focus'}`}
-                  >
-                    {evalResult.met ? t.goalMetBadge : t.goalFocusBadge}
-                  </span>
-                </div>
-              )
-            })}
+                ))
+              : record.goals.slice(0, 3).map((goalId) => {
+                  const evalResult = evaluateGoal(goalId, record, language)
+                  return (
+                    <div key={goalId} className="debrief-goal-row">
+                      <div>
+                        <p className="setting-title">{evalResult.label}</p>
+                        <p className="setting-desc">{evalResult.detail}</p>
+                      </div>
+                      <span
+                        className={`debrief-goal-badge ${evalResult.met ? 'met' : 'focus'}`}
+                      >
+                        {evalResult.met ? t.goalMetBadge : t.goalFocusBadge}
+                      </span>
+                    </div>
+                  )
+                })}
           </div>
         </div>
       )}
