@@ -3407,3 +3407,146 @@ select:focus-visible {
 
 
 
+
+/* ==========================================================================
+   Showcase VR Polish — Sleek Browser Shell, Primary Enter VR CTA & Drawer
+   ========================================================================== */
+
+.stage-card-showcase {
+  border-radius: 20px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.vr-stage-meta-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vr-mic-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(51, 65, 85, 0.85);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.vr-mic-pill.live {
+  background: rgba(6, 95, 70, 0.88);
+  color: #d1fae5;
+  border-color: rgba(52, 211, 153, 0.5);
+}
+
+.vr-mic-pill.blocked {
+  background: rgba(127, 29, 29, 0.88);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.vr-mic-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.vr-mic-pill.live .vr-mic-dot {
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+}
+
+.vr-mic-pill.blocked .vr-mic-dot {
+  background: #f87171;
+}
+
+.vr-enter-cta-btn {
+  border: 1px solid rgba(96, 165, 250, 0.65);
+  background: linear-gradient(135deg, #2563eb 0%, #0d9488 100%);
+  color: #ffffff;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 9px 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.35);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+}
+
+.vr-enter-cta-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(37, 99, 235, 0.48);
+  filter: brightness(1.06);
+}
+
+.vr-enter-cta-btn:active {
+  transform: translateY(0);
+}
+
+.vr-desktop-drawer {
+  position: absolute;
+  top: 72px;
+  right: 14px;
+  left: 14px;
+  z-index: 11;
+  background: rgba(9, 15, 29, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 14px 36px rgba(2, 6, 23, 0.45);
+}
+
+.vr-desktop-drawer-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vr-drawer-hint-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.vr-notice-banner {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  background: rgba(15, 23, 42, 0.94);
+  color: #e0f2fe;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 10px 26px rgba(2, 6, 23, 0.4);
+}
+
+.vr-preflight-cta {
+  background: linear-gradient(135deg, #1d4ed8 0%, #0f766e 100%);
+  box-shadow: 0 10px 24px rgba(29, 78, 216, 0.25);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.vr-preflight-cta:hover {
+  filter: brightness(1.05);
+}

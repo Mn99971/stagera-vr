@@ -210,18 +210,25 @@ export function createSessionId(): string {
 export class OptionalAudioRecorder {
   private recorder: MediaRecorder | null = null
   private stream: MediaStream | null = null
+  private ownsStream = false
   private chunks: Blob[] = []
 
-  async start(): Promise<boolean> {
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === 'undefined'
-    ) {
+  async start(existingStream?: MediaStream | null): Promise<boolean> {
+    if (typeof MediaRecorder === 'undefined') {
       return false
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      let stream = existingStream && existingStream.active ? existingStream : null
+      this.ownsStream = false
+
+      if (!stream) {
+        if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+          return false
+        }
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        this.ownsStream = true
+      }
+
       this.stream = stream
       const recorder = new MediaRecorder(stream)
       this.chunks = []
@@ -244,10 +251,11 @@ export class OptionalAudioRecorder {
         // Ignore
       }
     }
-    if (this.stream) {
+    if (this.stream && this.ownsStream) {
       this.stream.getTracks().forEach((t) => t.stop())
-      this.stream = null
     }
+    this.stream = null
+    this.ownsStream = false
     this.recorder = null
     if (this.chunks.length === 0) return null
     return new Blob(this.chunks, { type: 'audio/webm' })

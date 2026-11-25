@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { translations } from '../lib/i18n'
 import { claimPairingCode } from '../lib/pairing'
 import { loadSavedSetups } from '../lib/savedSetups'
+import { vrMicManager } from '../lib/vrMicManager'
 import type { AppLanguage, SessionSetup } from '../types/stagera'
 
 interface VRPreFlightProps {
@@ -9,7 +10,7 @@ interface VRPreFlightProps {
   userId?: string
   captionsEnabled: boolean
   onToggleCaptions: () => void
-  onStartSession: (setup: SessionSetup) => void
+  onStartSession: (setup: SessionSetup, pairingCode?: string | null) => void
 }
 
 export function VRPreFlight({
@@ -27,6 +28,7 @@ export function VRPreFlight({
   const [connecting, setConnecting] = useState(false)
   const [pairError, setPairError] = useState<string | null>(null)
   const [pairedFromPhone, setPairedFromPhone] = useState(false)
+  const [pairedCode, setPairedCode] = useState<string | null>(null)
   const [savedSetups, setSavedSetups] = useState<SessionSetup[]>([])
   const [selectedSetup, setSelectedSetup] = useState<SessionSetup | null>(null)
 
@@ -48,10 +50,12 @@ export function VRPreFlight({
     setPairedFromPhone(false)
     setConnecting(true)
     try {
-      const result = await claimPairingCode(codeInput)
+      const normalizedCode = codeInput.trim()
+      const result = await claimPairingCode(normalizedCode)
       if (result.ok) {
         setSelectedSetup(result.setup)
         setPairedFromPhone(true)
+        setPairedCode(normalizedCode)
         setCodeInput('')
       } else if (result.reason === 'invalid') {
         setPairError(t.errInvalidCode)
@@ -242,9 +246,12 @@ export function VRPreFlight({
                 <button
                   id="preflight-start-session-btn"
                   type="button"
-                  className="btn-primary"
+                  className="btn-primary vr-preflight-cta"
                   style={{ marginTop: 18 }}
-                  onClick={() => onStartSession(selectedSetup)}
+                  onClick={() => {
+                    void vrMicManager.requestMicFromGesture()
+                    onStartSession(selectedSetup, pairedCode)
+                  }}
                 >
                   {t.startSessionCta}
                 </button>
