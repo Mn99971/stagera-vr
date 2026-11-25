@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { QAQuestion } from '../ai/qaEngine'
 import { translations } from '../lib/i18n'
+import type { VRMicStatus } from '../lib/vrMicManager'
 import type { AppLanguage, SessionSetup, Topic } from '../types/stagera'
 
 interface PresenterHUDProps {
@@ -14,6 +15,7 @@ interface PresenterHUDProps {
   liveWpm: number
   liveFillers: number
   panelVisible: boolean
+  desktopControlsOpen: boolean
   isPaused: boolean
   isXRPresenting: boolean
   captionsEnabled: boolean
@@ -22,10 +24,14 @@ interface PresenterHUDProps {
   lastAutoSavedAt: string | null
   activeQuestion: QAQuestion | null
   answerSeconds: number
+  micStatus: VRMicStatus
+  xrNotice: string | null
+  gazeZone: 'left' | 'centre' | 'right'
   onPrevSlide: () => void
   onNextSlide: () => void
   onJumpToSlide: (index: number) => void
   onTogglePanel: () => void
+  onToggleDesktopControls: () => void
   onTogglePause: () => void
   onEnterVR: () => void
   onVoiceFeedback: (message: string) => void
@@ -75,6 +81,7 @@ export function PresenterHUD({
   liveWpm,
   liveFillers,
   panelVisible,
+  desktopControlsOpen,
   isPaused,
   isXRPresenting,
   captionsEnabled,
@@ -83,10 +90,14 @@ export function PresenterHUD({
   lastAutoSavedAt,
   activeQuestion,
   answerSeconds,
+  micStatus,
+  xrNotice,
+  gazeZone,
   onPrevSlide,
   onNextSlide,
   onJumpToSlide,
   onTogglePanel,
+  onToggleDesktopControls,
   onTogglePause,
   onEnterVR,
   onVoiceFeedback,
@@ -253,14 +264,40 @@ export function PresenterHUD({
     setup.oneMinWarning && remainingSeconds > 0 && remainingSeconds <= 60
   const showTimeUp = remainingSeconds === 0
 
+  const micPillClass =
+    micStatus === 'active'
+      ? 'vr-mic-pill live'
+      : micStatus === 'denied' || micStatus === 'unsupported'
+        ? 'vr-mic-pill blocked'
+        : 'vr-mic-pill'
+
+  const micPillText =
+    micStatus === 'active'
+      ? language === 'fr'
+        ? 'Micro actif'
+        : 'Mic Live'
+      : micStatus === 'denied' || micStatus === 'unsupported'
+        ? language === 'fr'
+          ? 'Micro bloqué'
+          : 'Mic Blocked'
+        : language === 'fr'
+          ? 'Micro prêt'
+          : 'Mic Standby'
+
   return (
     <>
-      {/* Top Bar Controls */}
+      {/* Sleek Showcase Top Bar — Primary Enter VR CTA + Collapsible Desktop Controls */}
       <div className="vr-stage-overlay-bar">
         <div className="vr-stage-meta">
-          <strong>{setup.title}</strong>
+          <div className="vr-stage-meta-top">
+            <strong>{setup.title}</strong>
+            <span className={micPillClass}>
+              <span className="vr-mic-dot" aria-hidden="true" />
+              {micPillText}
+            </span>
+          </div>
           <span>
-            {homeT.venues[setup.venue]} · {counterText}
+            {homeT.venues[setup.venue]} · {counterText} · {formatClock(remainingSeconds)}
             {hintUsed ? ` · ${t.hintUsedBadge}` : ''}
             {lastAutoSavedAt ? ` · ${t.autoSavedBadge} ${lastAutoSavedAt}` : ''}
           </span>
@@ -268,34 +305,75 @@ export function PresenterHUD({
 
         <div className="vr-stage-actions">
           <button
-            id="hud-prev-slide-btn"
+            id="vr-desktop-controls-toggle"
+            type="button"
+            className={`vr-hud-btn ${desktopControlsOpen ? 'active' : ''}`}
+            aria-expanded={desktopControlsOpen}
+            onClick={onToggleDesktopControls}
+          >
+            {language === 'fr' ? 'Contrôles bureau' : 'Desktop Controls'}{' '}
+            {desktopControlsOpen ? '▴' : '▾'}
+          </button>
+
+          <button
+            id="hud-pause-btn"
             type="button"
             className="vr-hud-btn"
-            disabled={currentSlideIndex <= 0 || isPaused}
-            onClick={onPrevSlide}
+            onClick={onTogglePause}
           >
-            ← {t.prevSlide}
+            ⏸ {t.pauseBtn}
           </button>
+
           <button
-            id="hud-next-slide-btn"
+            id="vr-enter-xr-btn"
             type="button"
-            className="vr-hud-btn"
-            disabled={currentSlideIndex >= totalSlides - 1 || isPaused}
-            onClick={onNextSlide}
+            className="vr-enter-cta-btn"
+            onClick={onEnterVR}
           >
-            {t.nextSlide} →
+            {t.enterVrBtn}
           </button>
-          <button
-            id="hud-voice-toggle-btn"
-            type="button"
-            className={`vr-hud-btn ${voiceActive ? 'active' : ''}`}
-            disabled={!speechSupported || isPaused}
-            aria-pressed={voiceActive}
-            onClick={() => setVoiceActive((prev) => !prev)}
-          >
-            {!speechSupported ? t.voiceUnsupported : voiceActive ? t.voiceOn : t.voiceOff}
-          </button>
-          {!isXRPresenting && (
+        </div>
+      </div>
+
+      {/* Optional XR retry notice (e.g., if mic dialog delayed gesture) */}
+      {xrNotice && (
+        <div className="vr-notice-banner" role="status">
+          {xrNotice}
+        </div>
+      )}
+
+      {/* Collapsible Desktop Simulator & Debug Controls Drawer */}
+      {desktopControlsOpen && !isXRPresenting && (
+        <div className="vr-desktop-drawer" aria-label="Desktop simulator controls">
+          <div className="vr-desktop-drawer-row">
+            <button
+              id="hud-prev-slide-btn"
+              type="button"
+              className="vr-hud-btn"
+              disabled={currentSlideIndex <= 0 || isPaused}
+              onClick={onPrevSlide}
+            >
+              ← {t.prevSlide}
+            </button>
+            <button
+              id="hud-next-slide-btn"
+              type="button"
+              className="vr-hud-btn"
+              disabled={currentSlideIndex >= totalSlides - 1 || isPaused}
+              onClick={onNextSlide}
+            >
+              {t.nextSlide} →
+            </button>
+            <button
+              id="hud-voice-toggle-btn"
+              type="button"
+              className={`vr-hud-btn ${voiceActive ? 'active' : ''}`}
+              disabled={!speechSupported || isPaused}
+              aria-pressed={voiceActive}
+              onClick={() => setVoiceActive((prev) => !prev)}
+            >
+              {!speechSupported ? t.voiceUnsupported : voiceActive ? t.voiceOn : t.voiceOff}
+            </button>
             <button
               id="hud-simulate-speech-btn"
               type="button"
@@ -305,43 +383,39 @@ export function PresenterHUD({
             >
               🎙 {t.simulateSpeechBtn}
             </button>
-          )}
-          <button
-            id="hud-trigger-question-btn"
-            type="button"
-            className="vr-hud-btn"
-            disabled={isPaused}
-            onClick={onTriggerQuestion}
-          >
-            ✋ {t.triggerQuestionBtn}
-          </button>
-          <button
-            id="hud-panel-toggle-btn"
-            type="button"
-            className={`vr-hud-btn ${panelVisible ? 'active' : ''}`}
-            aria-pressed={panelVisible}
-            onClick={onTogglePanel}
-          >
-            {panelVisible ? t.panelHide : t.panelShow}
-          </button>
-          <button
-            id="hud-pause-btn"
-            type="button"
-            className="vr-hud-btn"
-            onClick={onTogglePause}
-          >
-            ⏸ {t.pauseBtn}
-          </button>
-          <button
-            id="vr-enter-xr-btn"
-            type="button"
-            className="btn-small"
-            onClick={onEnterVR}
-          >
-            {t.enterVrBtn}
-          </button>
+            <button
+              id="hud-trigger-question-btn"
+              type="button"
+              className="vr-hud-btn"
+              disabled={isPaused}
+              onClick={onTriggerQuestion}
+            >
+              ✋ {t.triggerQuestionBtn}
+            </button>
+            <button
+              id="hud-panel-toggle-btn"
+              type="button"
+              className={`vr-hud-btn ${panelVisible ? 'active' : ''}`}
+              aria-pressed={panelVisible}
+              onClick={onTogglePanel}
+            >
+              {panelVisible ? t.panelHide : t.panelShow}
+            </button>
+          </div>
+
+          <div id="vr-simulator-hint-bar" className="vr-drawer-hint-row" aria-live="polite">
+            <span className="vr-simulator-gaze-pill">
+              {t.gazeZoneLabel}:{' '}
+              {gazeZone === 'left'
+                ? t.gazeZoneLeft
+                : gazeZone === 'right'
+                  ? t.gazeZoneRight
+                  : t.gazeZoneCentre}
+            </span>
+            <span className="vr-simulator-hint-text">{t.simulatorHint}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 1-Minute Warning / Time-Up Banner */}
       {(showOneMinWarning || showTimeUp) && (
@@ -354,7 +428,7 @@ export function PresenterHUD({
         </div>
       )}
 
-      {/* S2.3 Live Q&A Answering HUD */}
+      {/* S2.3 Live Q&A Answering HUD (Desktop view) */}
       {activeQuestion && !isPaused && (
         <div id="hud-qa-card" className="vr-qa-card" role="dialog" aria-label={qaT.answeringKicker}>
           <div className="vr-qa-top">
@@ -399,8 +473,8 @@ export function PresenterHUD({
         </div>
       )}
 
-      {/* Toggleable Private Presenter Panel (NFR-10: large readable text >=32px equivalent) */}
-      {panelVisible && (
+      {/* Toggleable Private Presenter Panel (Desktop view; inside VR this is VRTeleprompterBoard) */}
+      {panelVisible && desktopControlsOpen && (
         <aside className="vr-private-panel" aria-label={t.topicsHeading}>
           <div className="vr-private-timers">
             <div className="vr-timer-block">

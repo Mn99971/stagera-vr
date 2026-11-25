@@ -18,6 +18,7 @@ export function App() {
   const [step, setStep] = useState<'setup' | 'vr' | 'report'>('setup')
   const [userId, setUserId] = useState<string | undefined>(undefined)
   const [activeSetup, setActiveSetup] = useState<SessionSetup | null>(null)
+  const [activePairingCode, setActivePairingCode] = useState<string | null>(null)
   const [allSessions, setAllSessions] = useState<SessionRecord[]>(SAMPLE_SESSION_RECORDS)
   const [selectedReport, setSelectedReport] = useState<SessionRecord | null>(null)
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
@@ -118,13 +119,14 @@ export function App() {
         )}
 
         {step === 'vr' && (
-          <div className="stage-card">
+          <div className="stage-card stage-card-showcase">
             {activeSetup ? (
               <VRStage
                 setup={activeSetup}
                 userId={userId}
                 language={language}
                 captionsEnabled={captionsEnabled}
+                pairingCode={activePairingCode}
                 onBackToPreFlight={() => setActiveSetup(null)}
                 onEndSession={(record) => {
                   setAllSessions((prev) => [
@@ -141,7 +143,10 @@ export function App() {
                 userId={userId}
                 captionsEnabled={captionsEnabled}
                 onToggleCaptions={() => setCaptionsEnabled((prev) => !prev)}
-                onStartSession={(setup) => setActiveSetup(setup)}
+                onStartSession={(setup, code) => {
+                  setActivePairingCode(code ?? null)
+                  setActiveSetup(setup)
+                }}
               />
             )}
           </div>
