@@ -3,163 +3,243 @@ import type { SessionSetup } from '../types/stagera'
 
 export const PAIRING_EXPIRY_MS = 5 * 60 * 1000 // 5 minutes (FR-09)
 
-const LOCAL_PAIRING_KEY = 'stagera_pairing_codes_v1'
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-export interface PairingSessionRecord {
-  code: string
-  setup: SessionSetup
-  expiresAt: number
-  pairedAt?: number
+/**
+ * Unified public Supabase Realtime Broadcast channel name used by BOTH
+ * Headset (VRStage / VRFloatingLobby3D) and Phone (ConnectHeadsetScreen / VRPreFlight).
+ * No auth or RLS required so an unauthenticated Quest browser always connects.
+ */
+export function getPairingChannelName(code: string): string {
+  return `stagera-pair-${code}`
 }
 
-type PairingBroadcastMessage =
-  | { type: 'headset_join'; code: string }
-  | { type: 'session_payload'; code: string; setup: SessionSetup }
-  | { type: 'headset_ack'; code: string }
+export function isSupabaseRealtimeConfigured(): boolean {
+  return supabase !== null
+}
 
 function generateFourDigitCode(): string {
   const num = Math.floor(1000 + Math.random() * 9000)
   return String(num)
 }
 
-function readLocalPairings(): Record<string, PairingSessionRecord> {
-  try {
-    const raw = localStorage.getItem(LOCAL_PAIRING_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as Record<string, PairingSessionRecord>
-    const now = Date.now()
-    const pruned: Record<string, PairingSessionRecord> = {}
-    for (const [key, rec] of Object.entries(parsed)) {
-      // Keep records up to 10 min after expiry so we can distinguish expired vs not found
-      if (rec && typeof rec.expiresAt === 'number' && now - rec.expiresAt < 10 * 60 * 1000) {
-        pruned[key] = rec
-      }
-    }
-    return pruned
-  } catch {
-    return {}
-  }
+export function generateHeadsetLobbyCode(): string {
+  return generateFourDigitCode()
 }
 
-function writeLocalPairing(record: PairingSessionRecord): void {
-  try {
-    const all = readLocalPairings()
-    all[record.code] = record
-    localStorage.setItem(LOCAL_PAIRING_KEY, JSON.stringify(all))
-  } catch {
-    // Ignore storage errors in restricted contexts
-  }
+export interface HeadsetPairingCallbacks {
+  onPaired?: () => void
+  onLaunchSession: (setup: SessionSetup) => void
+  onError?: (message: string) => void
 }
 
-function createBroadcastChannel(code: string): BroadcastChannel | null {
-  try {
-    if (typeof BroadcastChannel !== 'undefined') {
-      return new BroadcastChannel(`stagera-pairing-${code}`)
-    }
-  } catch {
-    // Ignore if unsupported
-  }
-  return null
-}
-
-export async function createPairingSession(
-  userId: string,
-  setup: SessionSetup,
-): Promise<PairingSessionRecord> {
-  const code = generateFourDigitCode()
-  const expiresAt = Date.now() + PAIRING_EXPIRY_MS
-  const record: PairingSessionRecord = { code, setup, expiresAt }
-
-  writeLocalPairing(record)
-
-  if (supabase && !userId.startsWith('demo-')) {
-    const setupId = setup.id && UUID_REGEX.test(setup.id) ? setup.id : null
-    await supabase.from('pairing_codes').upsert({
-      code,
-      user_id: userId,
-      setup_id: setupId,
-      expires_at: new Date(expiresAt).toISOString(),
-    })
-  }
-
-  return record
-}
-
-export function subscribeHostPairing(
-  code: string,
-  setup: SessionSetup,
-  onHeadsetConnected: () => void,
+/**
+ * Headset side (`VRStage.tsx` / `VRFloatingLobby3D`):
+ * Subscribes to `stagera-pair-${code}` with `{ broadcast: { self: false, ack: true } }`.
+ * - On `phone_pair`: immediately broadcasts `headset_ack` and invokes `onPaired()`.
+ * - On `launch_session`: immediately broadcasts `headset_ack`, invokes `onPaired()`,
+ *   and invokes `onLaunchSession(setup)` to drop straight into the VR venue.
+ */
+export function subscribeHeadsetLobbyPairing(
+  rawCode: string,
+  callbacks: HeadsetPairingCallbacks,
 ): () => void {
-  let connected = false
-  const markConnected = () => {
-    if (connected) return
-    connected = true
-    const all = readLocalPairings()
-    if (all[code]) {
-      writeLocalPairing({ ...all[code], pairedAt: Date.now() })
-    }
-    if (supabase) {
-      void supabase
-        .from('pairing_codes')
-        .update({ paired_at: new Date().toISOString() })
-        .eq('code', code)
-    }
-    onHeadsetConnected()
+  const code = rawCode.replace(/\D/g, '').slice(0, 4)
+  if (code.length !== 4) {
+    return () => {}
   }
 
-  // 1. Browser BroadcastChannel fallback (same-origin tabs / demo mode)
-  const bc = createBroadcastChannel(code)
-  if (bc) {
-    bc.onmessage = (event: MessageEvent<PairingBroadcastMessage>) => {
-      const msg = event.data
-      if (!msg || msg.code !== code) return
-      if (msg.type === 'headset_join') {
-        bc.postMessage({ type: 'session_payload', code, setup } satisfies PairingBroadcastMessage)
-        markConnected()
-      } else if (msg.type === 'headset_ack') {
-        markConnected()
+  if (!supabase) {
+    const msg = 'Supabase Realtime not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
+    console.warn('[Stagera Pairing]', msg)
+    callbacks.onError?.(msg)
+    return () => {}
+  }
+
+  const client = supabase
+  let launched = false
+  const channelName = getPairingChannelName(code)
+
+  const channel = client.channel(channelName, {
+    config: { broadcast: { self: false, ack: true } },
+  })
+
+  const sendAck = () => {
+    void channel
+      .send({
+        type: 'broadcast',
+        event: 'headset_ack',
+        payload: { code, ts: Date.now() },
+      })
+      .catch((err: unknown) => {
+        console.warn('[Stagera Pairing] Failed to send headset_ack:', err)
+      })
+  }
+
+  channel
+    .on('broadcast', { event: 'phone_pair' }, () => {
+      sendAck()
+      callbacks.onPaired?.()
+    })
+    .on('broadcast', { event: 'launch_session' }, (msg) => {
+      sendAck()
+      callbacks.onPaired?.()
+      const payload = msg.payload as { setup?: SessionSetup } | SessionSetup | undefined
+      const setup =
+        payload && typeof payload === 'object' && 'setup' in payload && payload.setup
+          ? payload.setup
+          : (payload as SessionSetup | undefined)
+      if (!launched && setup && typeof setup.venue === 'string') {
+        launched = true
+        callbacks.onLaunchSession(setup)
       }
-    }
-  }
-
-  // 2. localStorage storage event fallback (cross-tab)
-  const onStorage = (e: StorageEvent) => {
-    if (e.key !== LOCAL_PAIRING_KEY) return
-    const all = readLocalPairings()
-    if (all[code]?.pairedAt) {
-      markConnected()
-    }
-  }
-  window.addEventListener('storage', onStorage)
-
-  // 3. Supabase Realtime Broadcast channel `pairing:<code>`
-  const rtChannel = supabase
-    ? supabase
-        .channel(`pairing:${code}`, { config: { broadcast: { self: false } } })
-        .on('broadcast', { event: 'headset_join' }, () => {
-          void rtChannel?.send({
-            type: 'broadcast',
-            event: 'session_payload',
-            payload: { code, setup },
-          })
-          markConnected()
-        })
-        .on('broadcast', { event: 'headset_ack' }, () => {
-          markConnected()
-        })
-        .subscribe()
-    : null
+    })
+    .subscribe((status, err) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        const detail = err?.message ? `: ${err.message}` : ''
+        const message = `Supabase Realtime ${status.toLowerCase()}${detail}`
+        console.error('[Stagera Pairing]', message)
+        callbacks.onError?.(message)
+      }
+    })
 
   return () => {
-    window.removeEventListener('storage', onStorage)
-    if (bc) {
-      bc.close()
+    void client.removeChannel(channel)
+  }
+}
+
+export type PhonePairingPhase =
+  | 'idle'
+  | 'connecting'
+  | 'waiting_headset'
+  | 'connected'
+  | 'error'
+
+export interface PhonePairingUpdate {
+  phase: PhonePairingPhase
+  message: string
+}
+
+/**
+ * Phone side (`ConnectHeadsetScreen.tsx`):
+ * Subscribes to `stagera-pair-${code}`, waits strictly for `status === 'SUBSCRIBED'`,
+ * broadcasts `phone_pair` + `launch_session` with the session setup payload,
+ * retries once after 1200ms if `headset_ack` hasn't arrived yet, and reports
+ * clear live status + explicit errors (no silent BroadcastChannel fallback).
+ */
+export function connectAndSendToHeadset(
+  rawCode: string,
+  setup: SessionSetup,
+  onUpdate: (update: PhonePairingUpdate) => void,
+): () => void {
+  const code = rawCode.replace(/\D/g, '').slice(0, 4)
+  if (code.length !== 4) {
+    onUpdate({ phase: 'error', message: 'Enter all 4 digits shown inside the headset.' })
+    return () => {}
+  }
+
+  if (!supabase) {
+    const message =
+      'Supabase is not configured (missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY). Cross-device pairing unavailable.'
+    console.error('[Stagera Pairing]', message)
+    onUpdate({ phase: 'error', message })
+    return () => {}
+  }
+
+  const client = supabase
+  let cancelled = false
+  let ackReceived = false
+  let retryTimer: number | null = null
+  let timeoutTimer: number | null = null
+
+  const channelName = getPairingChannelName(code)
+  onUpdate({ phase: 'connecting', message: 'Connecting to Supabase...' })
+
+  const channel = client.channel(channelName, {
+    config: { broadcast: { self: false, ack: true } },
+  })
+
+  const clearTimers = () => {
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer)
+      retryTimer = null
     }
-    if (supabase && rtChannel) {
-      void supabase.removeChannel(rtChannel)
+    if (timeoutTimer !== null) {
+      window.clearTimeout(timeoutTimer)
+      timeoutTimer = null
     }
+  }
+
+  const broadcastPairAndLaunch = async () => {
+    if (cancelled || ackReceived) return
+    try {
+      await channel.send({
+        type: 'broadcast',
+        event: 'phone_pair',
+        payload: { code, ts: Date.now() },
+      })
+      await channel.send({
+        type: 'broadcast',
+        event: 'launch_session',
+        payload: { code, setup },
+      })
+    } catch (err: unknown) {
+      if (cancelled || ackReceived) return
+      const errMsg = err instanceof Error ? err.message : 'Network broadcast failed'
+      console.error('[Stagera Pairing] Broadcast error:', err)
+      onUpdate({ phase: 'error', message: `Failed to send to headset: ${errMsg}` })
+    }
+  }
+
+  channel
+    .on('broadcast', { event: 'headset_ack' }, () => {
+      if (cancelled || ackReceived) return
+      ackReceived = true
+      clearTimers()
+      onUpdate({ phase: 'connected', message: '✓ Connected & sent to Quest!' })
+      // Keep channel briefly so any final delivery completes cleanly
+      window.setTimeout(() => {
+        void client.removeChannel(channel)
+      }, 1000)
+    })
+    .subscribe((status, err) => {
+      if (cancelled) return
+
+      if (status === 'SUBSCRIBED') {
+        onUpdate({ phase: 'waiting_headset', message: 'Waiting for headset...' })
+        void broadcastPairAndLaunch()
+
+        // Retry once after 1200ms if headset_ack hasn't arrived yet
+        retryTimer = window.setTimeout(() => {
+          if (!cancelled && !ackReceived) {
+            void broadcastPairAndLaunch()
+          }
+        }, 1200)
+
+        // Surface clear timeout error if headset never responds after 8s
+        timeoutTimer = window.setTimeout(() => {
+          if (!cancelled && !ackReceived) {
+            onUpdate({
+              phase: 'error',
+              message: `No response from headset for code ${code}. Double-check the 4-digit code shown inside Quest and try again.`,
+            })
+            void client.removeChannel(channel)
+          }
+        }, 8000)
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        clearTimers()
+        const detail = err?.message ? ` (${err.message})` : ''
+        const message = `Supabase Realtime connection failed: ${status}${detail}. Check network & VITE_SUPABASE_URL.`
+        console.error('[Stagera Pairing]', message)
+        onUpdate({ phase: 'error', message })
+        void client.removeChannel(channel)
+      } else if (status === 'CLOSED' && !ackReceived) {
+        clearTimers()
+      }
+    })
+
+  return () => {
+    cancelled = true
+    clearTimers()
+    void client.removeChannel(channel)
   }
 }
 
@@ -167,205 +247,54 @@ export type ClaimPairingResult =
   | { ok: true; setup: SessionSetup }
   | { ok: false; reason: 'invalid' | 'expired' | 'not_found' }
 
+/**
+ * Legacy helper retained for `VRPreFlight.tsx` (desktop Step 2 manual code entry).
+ * Uses the same unified `stagera-pair-${code}` Supabase Realtime channel.
+ */
 export async function claimPairingCode(rawCode: string): Promise<ClaimPairingResult> {
   const code = rawCode.replace(/\D/g, '').slice(0, 4)
   if (code.length !== 4) {
     return { ok: false, reason: 'invalid' }
   }
 
-  const now = Date.now()
-  const localRecords = readLocalPairings()
-  const localMatch = localRecords[code]
+  if (!supabase) {
+    console.warn('[Stagera Pairing] Supabase not configured for claimPairingCode.')
+    return { ok: false, reason: 'not_found' }
+  }
 
-  if (localMatch) {
-    if (now > localMatch.expiresAt) {
-      return { ok: false, reason: 'expired' }
+  const client = supabase
+  const setup = await new Promise<SessionSetup | null>((resolve) => {
+    let settled = false
+    const finish = (found: SessionSetup | null) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      void client.removeChannel(channel)
+      resolve(found)
     }
-    // Mark paired & notify phone tab live via BroadcastChannel + Realtime
-    writeLocalPairing({ ...localMatch, pairedAt: now })
-    const bc = createBroadcastChannel(code)
-    if (bc) {
-      bc.postMessage({ type: 'headset_ack', code } satisfies PairingBroadcastMessage)
-      bc.close()
-    }
-    if (supabase) {
-      const ackChannel = supabase.channel(`pairing:${code}`)
-      ackChannel.subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void ackChannel.send({
+
+    const channel = client
+      .channel(getPairingChannelName(code), {
+        config: { broadcast: { self: false, ack: true } },
+      })
+      .on('broadcast', { event: 'launch_session' }, (msg) => {
+        const payload = msg.payload as { setup?: SessionSetup } | undefined
+        if (payload?.setup) {
+          void channel.send({
             type: 'broadcast',
             event: 'headset_ack',
             payload: { code },
           })
-          setTimeout(() => {
-            void supabase?.removeChannel(ackChannel)
-          }, 500)
+          finish(payload.setup)
         }
       })
-    }
-    return { ok: true, setup: localMatch.setup }
-  }
+      .subscribe()
 
-  // Try cross-device Supabase Realtime Broadcast (`pairing:<code>`)
-  if (supabase) {
-    const client = supabase
-    const realtimeResult = await new Promise<SessionSetup | null>((resolve) => {
-      let settled = false
-      const finish = (setup: SessionSetup | null) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        void client.removeChannel(channel)
-        resolve(setup)
-      }
-
-      const channel = client
-        .channel(`pairing:${code}`, { config: { broadcast: { self: false } } })
-        .on('broadcast', { event: 'session_payload' }, (payload) => {
-          const setup = (payload.payload as { setup?: SessionSetup } | undefined)?.setup
-          if (setup) {
-            void channel.send({
-              type: 'broadcast',
-              event: 'headset_ack',
-              payload: { code },
-            })
-            finish(setup)
-          }
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            void channel.send({
-              type: 'broadcast',
-              event: 'headset_join',
-              payload: { code },
-            })
-          }
-        })
-
-      const timer = setTimeout(() => finish(null), 2500)
-    })
-
-    if (realtimeResult) {
-      return { ok: true, setup: realtimeResult }
-    }
-  }
-
-  // Try same-origin BroadcastChannel as fallback if storage wasn't shared
-  const bcResult = await new Promise<SessionSetup | null>((resolve) => {
-    const bc = createBroadcastChannel(code)
-    if (!bc) {
-      resolve(null)
-      return
-    }
-    let settled = false
-    const finish = (setup: SessionSetup | null) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      bc.close()
-      resolve(setup)
-    }
-
-    bc.onmessage = (event: MessageEvent<PairingBroadcastMessage>) => {
-      const msg = event.data
-      if (msg?.type === 'session_payload' && msg.code === code) {
-        bc.postMessage({ type: 'headset_ack', code } satisfies PairingBroadcastMessage)
-        finish(msg.setup)
-      }
-    }
-    bc.postMessage({ type: 'headset_join', code } satisfies PairingBroadcastMessage)
-    const timer = setTimeout(() => finish(null), 1200)
+    const timer = window.setTimeout(() => finish(null), 4000)
   })
 
-  if (bcResult) {
-    return { ok: true, setup: bcResult }
+  if (setup) {
+    return { ok: true, setup }
   }
-
   return { ok: false, reason: 'not_found' }
 }
-
-/**
- * Generates a fresh 4-digit pairing code for the in-headset 3D VR Lobby.
- */
-export function generateHeadsetLobbyCode(): string {
-  return generateFourDigitCode()
-}
-
-/**
- * Subscribes a VR headset sitting in the 3D Floating Lobby to incoming phone
- * session launches over Supabase Realtime Broadcast (`pairing:<code>`) and
- * same-origin BroadcastChannel fallback. When a phone sends a session payload,
- * immediately invokes `onSessionReceived(setup)` to drop straight into the venue.
- */
-export function subscribeHeadsetLobbyPairing(
-  code: string,
-  onSessionReceived: (setup: SessionSetup) => void,
-): () => void {
-  let received = false
-
-  const deliver = (setup: SessionSetup | undefined) => {
-    if (received || !setup) return
-    received = true
-    onSessionReceived(setup)
-  }
-
-  // 1. Same-origin BroadcastChannel fallback
-  const bc = createBroadcastChannel(code)
-  if (bc) {
-    bc.onmessage = (event: MessageEvent<PairingBroadcastMessage>) => {
-      const msg = event.data
-      if (msg?.type === 'session_payload' && msg.code === code) {
-        bc.postMessage({ type: 'headset_ack', code } satisfies PairingBroadcastMessage)
-        deliver(msg.setup)
-      }
-    }
-    bc.postMessage({ type: 'headset_join', code } satisfies PairingBroadcastMessage)
-  }
-
-  // 2. Supabase Realtime Broadcast (`pairing:<code>`)
-  const rtChannel = supabase
-    ? supabase
-        .channel(`pairing:${code}`, { config: { broadcast: { self: false } } })
-        .on('broadcast', { event: 'session_payload' }, (payload) => {
-          const setup = (payload.payload as { setup?: SessionSetup } | undefined)?.setup
-          if (setup) {
-            void rtChannel?.send({
-              type: 'broadcast',
-              event: 'headset_ack',
-              payload: { code },
-            })
-            deliver(setup)
-          }
-        })
-        .on('broadcast', { event: 'launch_venue' }, (payload) => {
-          const setup = (payload.payload as { setup?: SessionSetup } | undefined)?.setup
-          if (setup) {
-            void rtChannel?.send({
-              type: 'broadcast',
-              event: 'headset_ack',
-              payload: { code },
-            })
-            deliver(setup)
-          }
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            void rtChannel?.send({
-              type: 'broadcast',
-              event: 'headset_join',
-              payload: { code },
-            })
-          }
-        })
-    : null
-
-  return () => {
-    if (bc) {
-      bc.close()
-    }
-    if (supabase && rtChannel) {
-      void supabase.removeChannel(rtChannel)
-    }
-  }
-}
-

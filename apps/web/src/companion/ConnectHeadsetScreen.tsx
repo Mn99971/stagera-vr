@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { translations } from '../lib/i18n'
 import {
-  createPairingSession,
-  subscribeHostPairing,
-  type PairingSessionRecord,
+  connectAndSendToHeadset,
+  isSupabaseRealtimeConfigured,
+  type PhonePairingPhase,
 } from '../lib/pairing'
 import type { AppLanguage, SessionSetup } from '../types/stagera'
 import { LanguageToggle } from './LanguageToggle'
@@ -17,16 +17,8 @@ interface ConnectHeadsetScreenProps {
   onLaunchLocalVR: (setup: SessionSetup) => void
 }
 
-function formatCountdown(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
-  const mins = Math.floor(totalSeconds / 60)
-  const secs = totalSeconds % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
 export function ConnectHeadsetScreen({
   language,
-  userId,
   setup,
   onLanguageChange,
   onBack,
@@ -35,45 +27,47 @@ export function ConnectHeadsetScreen({
   const t = translations[language].pairing
   const homeT = translations[language].home
 
-  const [record, setRecord] = useState<PairingSessionRecord | null>(null)
-  const [remainingMs, setRemainingMs] = useState(5 * 60 * 1000)
-  const [status, setStatus] = useState<'waiting' | 'connected' | 'expired'>('waiting')
+  const [code, setCode] = useState('')
+  const [phase, setPhase] = useState<PhonePairingPhase>('idle')
+  const [statusMessage, setStatusMessage] = useState<string>(
+    isSupabaseRealtimeConfigured()
+      ? 'Enter the 4-digit code shown in your Quest VR lobby.'
+      : 'Warning: Supabase Realtime env vars (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) are missing.',
+  )
 
-  const startNewCode = useCallback(async () => {
-    setStatus('waiting')
-    const created = await createPairingSession(userId, setup)
-    setRecord(created)
-    setRemainingMs(Math.max(0, created.expiresAt - Date.now()))
-  }, [setup, userId])
-
-  useEffect(() => {
-    void startNewCode()
-  }, [startNewCode])
+  const cleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    if (!record) return
-    const unsubscribe = subscribeHostPairing(record.code, setup, () => {
-      setStatus('connected')
+    return () => {
+      cleanupRef.current?.()
+      cleanupRef.current = null
+    }
+  }, [])
+
+  const sanitizeCode = (raw: string) => raw.replace(/\D/g, '').slice(0, 4)
+
+  const handleCodeChange = (raw: string) => {
+    const cleaned = sanitizeCode(raw)
+    setCode(cleaned)
+    if (phase === 'error' || phase === 'connected') {
+      setPhase('idle')
+      setStatusMessage('Enter the 4-digit code shown in your Quest VR lobby.')
+    }
+  }
+
+  const handleConnectSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    if (code.length !== 4) return
+
+    cleanupRef.current?.()
+    cleanupRef.current = connectAndSendToHeadset(code, setup, (update) => {
+      setPhase(update.phase)
+      setStatusMessage(update.message)
     })
-    return unsubscribe
-  }, [record, setup])
+  }
 
-  useEffect(() => {
-    if (!record || status === 'connected') return
-    const interval = window.setInterval(() => {
-      const left = record.expiresAt - Date.now()
-      if (left <= 0) {
-        setRemainingMs(0)
-        setStatus('expired')
-        window.clearInterval(interval)
-      } else {
-        setRemainingMs(left)
-      }
-    }, 1000)
-    return () => window.clearInterval(interval)
-  }, [record, status])
-
-  const digits = (record?.code ?? '----').split('')
+  const isBusy = phase === 'connecting' || phase === 'waiting_headset'
+  const supabaseReady = isSupabaseRealtimeConfigured()
 
   return (
     <section className="companion-screen" aria-label={t.heading}>
@@ -89,7 +83,10 @@ export function ConnectHeadsetScreen({
       <h1 className="screen-title" style={{ marginTop: 4 }}>
         {t.heading}
       </h1>
-      <p className="screen-subtitle">{t.subtitle}</p>
+      <p className="screen-subtitle">
+        Open Stagera VR on Meta Quest to view your 4-digit lobby code, then enter it below to
+        launch this session directly in the headset.
+      </p>
 
       <div className="dash-card" style={{ marginBottom: 14 }}>
         <p className="setup-row-title" style={{ whiteSpace: 'normal' }}>
@@ -107,56 +104,91 @@ export function ConnectHeadsetScreen({
         </div>
       </div>
 
-      <div className="pairing-code-card" aria-live="polite">
-        <span className="pairing-code-label">{t.codeLabel}</span>
-        <div className="pairing-digits" aria-label={record?.code ?? ''}>
-          {digits.map((digit, idx) => (
-            <span
-              key={idx}
-              className={`pairing-digit ${status === 'expired' ? 'expired' : ''}`}
-            >
-              {digit}
-            </span>
-          ))}
-        </div>
+      <form className="pairing-code-card" onSubmit={handleConnectSubmit} noValidate>
+        <label htmlFor="phone-pairing-code-input" className="pairing-code-label">
+          Enter 4-Digit Headset Code
+        </label>
 
-        <div className="pairing-timer-row">
-          {status === 'expired' ? (
-            <span className="pairing-expiry-text expired">{t.codeExpired}</span>
-          ) : (
-            <span className="pairing-expiry-text">
-              {t.expiresIn.replace('{time}', formatCountdown(remainingMs))}
-            </span>
-          )}
-        </div>
+        {/* Single rock-solid numeric input compatible with Chrome, Samsung Internet & Firefox Android */}
+        <input
+          id="phone-pairing-code-input"
+          type="tel"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={4}
+          autoComplete="one-time-code"
+          placeholder="0000"
+          value={code}
+          disabled={isBusy}
+          onChange={(e) => handleCodeChange(e.target.value)}
+          onInput={(e) => handleCodeChange((e.target as HTMLInputElement).value)}
+          style={{
+            width: '100%',
+            maxWidth: 260,
+            margin: '12px auto 14px',
+            display: 'block',
+            textAlign: 'center',
+            fontSize: 38,
+            fontWeight: 800,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            letterSpacing: '0.45em',
+            padding: '14px 12px 14px 26px',
+            borderRadius: 14,
+            border:
+              phase === 'error'
+                ? '2px solid #dc2626'
+                : phase === 'connected'
+                  ? '2px solid #059669'
+                  : '2px solid var(--border-strong)',
+            background: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+          }}
+        />
 
+        <button
+          id="pairing-send-headset-btn"
+          type="submit"
+          className="btn-primary"
+          disabled={code.length !== 4 || isBusy}
+          style={{ maxWidth: 320, margin: '0 auto' }}
+        >
+          {phase === 'connecting'
+            ? 'Connecting to Supabase...'
+            : phase === 'waiting_headset'
+              ? 'Waiting for headset...'
+              : phase === 'connected'
+                ? '✓ Sent — Send Again'
+                : 'Connect & Send to Headset'}
+        </button>
+
+        {/* Clear live status text directly under input */}
         <div
           id="pairing-status-pill"
-          className={`pairing-status-pill ${status}`}
           role="status"
+          aria-live="polite"
+          style={{
+            marginTop: 14,
+            padding: '10px 14px',
+            borderRadius: 10,
+            fontSize: 13.5,
+            fontWeight: 600,
+            background:
+              phase === 'connected'
+                ? '#dcfce7'
+                : phase === 'error' || !supabaseReady
+                  ? '#fee2e2'
+                  : 'var(--bg-subtle)',
+            color:
+              phase === 'connected'
+                ? '#166534'
+                : phase === 'error' || !supabaseReady
+                  ? '#991b1b'
+                  : 'var(--text-secondary)',
+          }}
         >
-          <span className={`pairing-status-dot ${status}`} aria-hidden="true" />
-          <span>
-            {status === 'connected'
-              ? t.statusConnected
-              : status === 'expired'
-                ? t.statusExpired
-                : t.statusWaiting}
-          </span>
+          {statusMessage}
         </div>
-
-        {status === 'expired' && (
-          <button
-            id="pairing-regenerate-btn"
-            type="button"
-            className="btn-secondary"
-            style={{ marginTop: 12 }}
-            onClick={() => void startNewCode()}
-          >
-            {t.generateNewCode}
-          </button>
-        )}
-      </div>
+      </form>
 
       <div className="dash-card" style={{ marginBottom: 0 }}>
         <h2 className="dash-card-title" style={{ marginBottom: 10 }}>
@@ -188,7 +220,7 @@ export function ConnectHeadsetScreen({
         <button
           id="pairing-launch-local-btn"
           type="button"
-          className="btn-primary"
+          className="btn-secondary"
           onClick={() => onLaunchLocalVR(setup)}
         >
           {t.launchLocalCta}

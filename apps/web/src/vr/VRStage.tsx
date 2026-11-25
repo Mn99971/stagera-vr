@@ -1876,15 +1876,20 @@ export function VRStage({
     [hudT.captionReady],
   )
 
-  // Subscribe 3D Floating VR Lobby to incoming phone pairing launches via Supabase Realtime
+  // Subscribe 3D Floating VR Lobby to unified `stagera-pair-<code>` Supabase Realtime Broadcast channel
   useEffect(() => {
     if (phase !== 'vr_lobby') return
     setLobbyPairingStatus('waiting')
-    const unsubscribe = subscribeHeadsetLobbyPairing(lobbyPairingCode, (phoneSetup) => {
-      setLobbyPairingStatus('paired')
-      window.setTimeout(() => {
-        resetSessionRun(0, phoneSetup)
-      }, 350)
+    const unsubscribe = subscribeHeadsetLobbyPairing(lobbyPairingCode, {
+      onPaired: () => {
+        setLobbyPairingStatus('paired')
+      },
+      onLaunchSession: (phoneSetup) => {
+        setLobbyPairingStatus('paired')
+        window.setTimeout(() => {
+          resetSessionRun(0, phoneSetup)
+        }, 250)
+      },
     })
     return unsubscribe
   }, [lobbyPairingCode, phase, resetSessionRun])
