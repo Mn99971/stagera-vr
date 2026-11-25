@@ -1693,7 +1693,7 @@ export function VRFloatingLobby3D({
           anchorX="center"
           anchorY="middle"
         >
-          {pairingStatus === 'paired' ? '● Paired · Launching...' : '● Waiting for Phone...'}
+          {pairingStatus === 'paired' ? 'Paired ✓ · Launching...' : '● Waiting for Phone...'}
         </Text>
 
         <VRButton3D

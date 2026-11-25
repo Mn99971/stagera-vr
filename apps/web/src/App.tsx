@@ -36,13 +36,18 @@ const DEFAULT_HEADSET_SETUP: SessionSetup = {
   ],
 }
 
-function hasVRHeadsetUA(): boolean {
+function shouldBootInVRHeadsetMode(): boolean {
+  if (typeof window !== 'undefined') {
+    const mode = new URLSearchParams(window.location.search).get('mode')?.toLowerCase()
+    if (mode === 'phone' || mode === 'web') return false
+    if (mode === 'vr') return true
+  }
   if (typeof navigator === 'undefined') return false
-  return /OculusBrowser|Quest/i.test(navigator.userAgent)
+  return /OculusBrowser|Quest|Pico|Vive|Mobile VR|Wolvic/i.test(navigator.userAgent)
 }
 
 export function App() {
-  const [isHeadset, setIsHeadset] = useState<boolean>(() => hasVRHeadsetUA())
+  const [isHeadset] = useState<boolean>(() => shouldBootInVRHeadsetMode())
   const [forceWeb2D, setForceWeb2D] = useState(false)
   const [step, setStep] = useState<'setup' | 'vr' | 'report'>('setup')
   const [userId, setUserId] = useState<string | undefined>(undefined)
@@ -52,23 +57,6 @@ export function App() {
   const [selectedReport, setSelectedReport] = useState<SessionRecord | null>(null)
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [language, setLanguage] = useState<AppLanguage>(() => getStoredLanguage())
-
-  // Detect any WebXR immersive-vr capable headset asynchronously (instant UA hint already prevents 2D flash on Quest)
-  useEffect(() => {
-    if (typeof navigator === 'undefined' || !navigator.xr?.isSessionSupported) return
-    let active = true
-    void navigator.xr
-      .isSessionSupported('immersive-vr')
-      .then((supported) => {
-        if (active && supported) {
-          setIsHeadset(true)
-        }
-      })
-      .catch(() => {})
-    return () => {
-      active = false
-    }
-  }, [])
 
   useEffect(() => {
     document.documentElement.lang = language
