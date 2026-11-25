@@ -27,6 +27,9 @@ export interface BuildSessionRecordInput {
   hintUsed: boolean
   transcript: string
   flaggedMoments: FlaggedMoment[]
+  /** Optional Quest Audio VAD fallback counts when Web Speech API is unsupported */
+  vadWordCount?: number
+  vadSpeakingSeconds?: number
 }
 
 export function generateRecommendations(
@@ -105,6 +108,15 @@ export function generateRecommendations(
 }
 
 export function buildSessionRecord(input: BuildSessionRecordInput): SessionRecord {
+  const effectiveTranscript =
+    input.transcript.trim().length > 0
+      ? input.transcript
+      : input.vadWordCount && input.vadWordCount > 0
+        ? input.language === 'fr'
+          ? `[Activité vocale casque VR : ~${input.vadWordCount} mots détectés sur ${Math.round(input.vadSpeakingSeconds ?? 0)}s de parole]`
+          : `[VR Headset Live Audio VAD: ~${input.vadWordCount} spoken words across ${Math.round(input.vadSpeakingSeconds ?? 0)}s of active speech]`
+        : ''
+
   return {
     id: input.sessionId,
     setupId: input.setup.id,
@@ -123,7 +135,7 @@ export function buildSessionRecord(input: BuildSessionRecordInput): SessionRecor
     topicsTotal: input.topicsTotal,
     iCount: input.iCount,
     weCount: input.weCount,
-    transcript: input.transcript,
+    transcript: effectiveTranscript,
     recommendations: generateRecommendations(input),
     flaggedMoments: input.flaggedMoments,
     goals: input.setup.goals,
