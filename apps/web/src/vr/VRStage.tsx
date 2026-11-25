@@ -839,11 +839,12 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
 
 /**
  * Monitors XR sessionstart (resumes mic + procedural audio), controller triggers
- * (slide control or S2.1 lobby trigger test), and automatic low-head-height comfort lift.
+ * (strictly debounced 350ms, gated to phase === 'active' & !isPaused & !uiHovered),
+ * and automatic low-head-height comfort lift.
  */
 function XRAudioAndTriggerBridge({
+  phase,
   isPaused,
-  isVRLobby,
   seatedHeightMode,
   uiHoveredCountRef,
   onPrevSlide,
@@ -851,8 +852,8 @@ function XRAudioAndTriggerBridge({
   onLobbyTriggerTest,
   onAutoHeightOffsetChange,
 }: {
+  phase: StagePhase
   isPaused: boolean
-  isVRLobby: boolean
   seatedHeightMode: boolean
   uiHoveredCountRef: React.MutableRefObject<number>
   onPrevSlide: () => void
@@ -862,10 +863,10 @@ function XRAudioAndTriggerBridge({
 }) {
   const { gl, camera } = useThree()
   const checkedAutoHeightRef = useRef(false)
+  const lastTriggerAtRef = useRef(0)
 
   useFrame(() => {
     if (!gl.xr.isPresenting || seatedHeightMode || checkedAutoHeightRef.current) return
-    // If headset reports seated/low eye height (< 1.28m) on entry, apply +0.25m comfort lift
     if (camera.position.y > 0.15 && camera.position.y < 1.28) {
       checkedAutoHeightRef.current = true
       onAutoHeightOffsetChange(0.25)
@@ -879,12 +880,20 @@ function XRAudioAndTriggerBridge({
     let attachedSession: XRSession | null = null
 
     const onSelectStart = (event: XRInputSourceEvent) => {
+      // Never intercept trigger when ray is hovering any 3D UI button
       if (uiHoveredCountRef.current > 0) return
-      if (isVRLobby) {
+
+      // 350ms debounce so a single trigger pull never double-fires
+      const now = performance.now()
+      if (now - lastTriggerAtRef.current < 350) return
+      lastTriggerAtRef.current = now
+
+      if (phase === 'vr_lobby') {
         onLobbyTriggerTest()
         return
       }
-      if (isPaused) return
+      if (phase !== 'active' || isPaused) return
+
       if (event.inputSource.handedness === 'left') {
         onPrevSlide()
       } else {
@@ -924,11 +933,11 @@ function XRAudioAndTriggerBridge({
   }, [
     gl,
     isPaused,
-    isVRLobby,
     onAutoHeightOffsetChange,
     onLobbyTriggerTest,
     onNextSlide,
     onPrevSlide,
+    phase,
     uiHoveredCountRef,
   ])
 
@@ -1208,9 +1217,7 @@ export function VRStage({
 
   const [sessionId, setSessionId] = useState<string>(() => createSessionId())
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0)
-  const [coveredIds, setCoveredIds] = useState<Set<string>>(() =>
-    topics[0] ? new Set([topics[0].id]) : new Set(),
-  )
+  const [coveredIds, setCoveredIds] = useState<Set<string>>(() => new Set())
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
   const [panelVisible, setPanelVisible] = useState(true)
@@ -1225,6 +1232,7 @@ export function VRStage({
   const autoEnterAttemptedRef = useRef(false)
   const oneMinWarnedRef = useRef(false)
   const distractionCounterRef = useRef(0)
+  const lastSessionTransitionAtRef = useRef(0)
 
   useEffect(() => {
     const unsubMic = vrMicManager.subscribe(setMicSnap)
@@ -1246,7 +1254,7 @@ export function VRStage({
       vrAudioEngine.stopRoomAmbience()
       vrAudioEngine.startLobbyMusic()
     } else if (phase === 'active') {
-      vrAudioEngine.stopLobbyMusic(0.75)
+      vrAudioEngine.stopLobbyMusic(0.55)
       vrAudioEngine.startRoomAmbience(activeSetup.venue)
     } else if (phase === 'debrief') {
       vrAudioEngine.stopRoomAmbience()
@@ -1276,20 +1284,6 @@ export function VRStage({
     return () => window.clearTimeout(timer)
   }, [headsetBootMode])
 
-  // Subscribe 3D Floating VR Lobby to incoming phone pairing launches via Supabase Realtime
-  useEffect(() => {
-    if (phase !== 'vr_lobby') return
-    setLobbyPairingStatus('waiting')
-    const unsubscribe = subscribeHeadsetLobbyPairing(lobbyPairingCode, (phoneSetup) => {
-      setLobbyPairingStatus('paired')
-      setActiveSetup(phoneSetup)
-      window.setTimeout(() => {
-        setPhase('active')
-      }, 450)
-    })
-    return unsubscribe
-  }, [lobbyPairingCode, phase])
-
   // Speech delivery, Q&A, Auto-flagging & Debrief state
   const analyzerRef = useRef<SpeechDeliveryAnalyzer>(new SpeechDeliveryAnalyzer())
   const audioRecorderRef = useRef<OptionalAudioRecorder>(new OptionalAudioRecorder())
@@ -1304,12 +1298,29 @@ export function VRStage({
   const qaCountRef = useRef<number>(0)
 
   const [liveWpm, setLiveWpm] = useState(0)
+  const [liveWordCount, setLiveWordCount] = useState(0)
   const [liveFillers, setLiveFillers] = useState(0)
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const [flaggedMoments, setFlaggedMoments] = useState<FlaggedMoment[]>([])
   const [activeQuestion, setActiveQuestion] = useState<QAQuestion | null>(null)
   const [answerSeconds, setAnswerSeconds] = useState(0)
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string | null>(null)
   const [completedRecord, setCompletedRecord] = useState<SessionRecord | null>(null)
+
+  // Keep refs in sync for the 60ms VAD interval so it never needs to re-subscribe
+  const activeQuestionRef = useRef<QAQuestion | null>(null)
+  const currentSlideIndexRef = useRef(0)
+  const topicsRef = useRef<Topic[]>(topics)
+  const elapsedSecondsRef = useRef(0)
+  activeQuestionRef.current = activeQuestion
+  currentSlideIndexRef.current = currentSlideIndex
+  topicsRef.current = topics
+  elapsedSecondsRef.current = elapsedSeconds
+
+  // Prevent stuck raycast hover count whenever UI screens mount/unmount
+  useEffect(() => {
+    uiHoveredCountRef.current = 0
+  }, [phase, isPaused])
 
   const remainingSeconds = Math.max(0, totalLimitSeconds - elapsedSeconds)
 
@@ -1388,16 +1399,16 @@ export function VRStage({
           typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
             ? crypto.randomUUID()
             : `flag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
-        timestampSeconds: elapsedSeconds,
+        timestampSeconds: elapsedSecondsRef.current,
         momentType,
         label,
         transcriptExcerpt: opts?.transcriptExcerpt,
         aiTip: opts?.aiTip,
-        slideIndex: opts?.slideIndex ?? currentSlideIndex,
+        slideIndex: opts?.slideIndex ?? currentSlideIndexRef.current,
       }
       setFlaggedMoments((prev) => [...prev, flag])
     },
-    [currentSlideIndex, elapsedSeconds],
+    [],
   )
 
   const computeGazeZones = useCallback((): GazeZones => {
@@ -1411,12 +1422,16 @@ export function VRStage({
 
   const snapshotCurrentRecord = useCallback((): SessionRecord => {
     const speech = analyzerRef.current.getSnapshot(Math.max(1, elapsedSeconds))
+    const vad = vrMicManager.getVADMetrics()
+    const useVadFallback = speech.totalWords === 0 && vad.estimatedWords > 0
+    const effectiveWpm = useVadFallback ? vad.overallWpm || vad.rollingWpm : speech.overallWpm
+
     return buildSessionRecord({
       sessionId,
       setup: activeSetup,
       language,
       durationSeconds: elapsedSeconds,
-      wpm: speech.overallWpm,
+      wpm: effectiveWpm,
       fillerCount: speech.fillerCount,
       fillerBreakdown: speech.fillerBreakdown,
       eyeContactZones: computeGazeZones(),
@@ -1427,6 +1442,8 @@ export function VRStage({
       hintUsed,
       transcript: speech.transcript,
       flaggedMoments,
+      vadWordCount: useVadFallback ? vad.estimatedWords : undefined,
+      vadSpeakingSeconds: useVadFallback ? vad.speakingDurationSeconds : undefined,
     })
   }, [
     activeSetup,
@@ -1460,10 +1477,70 @@ export function VRStage({
     if (phase !== 'active' || isPaused) return
     const timer = window.setInterval(() => {
       setElapsedSeconds((prev) => prev + 1)
-      setAnswerSeconds((prev) => (activeQuestion ? prev + 1 : 0))
+      setAnswerSeconds((prev) => (activeQuestionRef.current ? prev + 1 : 0))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [activeQuestion, isPaused, phase])
+  }, [isPaused, phase])
+
+  // Real-Time Quest Audio VAD & Syllable Pace Tracker loop (~60ms cadence)
+  // Drives live WPM, word count, speaking badge, >3.5s pause flags & auto slide coverage
+  // whenever SpeechRecognition is unavailable or emits 0 words (Meta Quest Browser).
+  useEffect(() => {
+    if (phase !== 'active' || isPaused) {
+      setIsSpeaking(false)
+      return
+    }
+    let lastUiSync = 0
+    let prevSpeaking = false
+
+    const interval = window.setInterval(() => {
+      const step = vrMicManager.stepVAD(0.06, { inQA: activeQuestionRef.current !== null })
+
+      if (step.slideCoveredNow) {
+        const currentTopic = topicsRef.current[currentSlideIndexRef.current]
+        if (currentTopic) {
+          setCoveredIds((prev) => {
+            if (prev.has(currentTopic.id)) return prev
+            const next = new Set(prev)
+            next.add(currentTopic.id)
+            return next
+          })
+        }
+      }
+
+      if (step.detectedLongPause) {
+        addFlag(
+          'long_pause',
+          language === 'fr'
+            ? `Pause longue (${step.longPauseSeconds}s)`
+            : `Long pause (${step.longPauseSeconds}s)`,
+          {
+            aiTip:
+              language === 'fr'
+                ? 'Utilisez une courte phrase de transition pour garder le fil.'
+                : 'Use a brief bridging phrase to keep momentum after a pause.',
+          },
+        )
+      }
+
+      const now = performance.now()
+      const speakingChanged = step.metrics.isSpeaking !== prevSpeaking
+      if (speakingChanged || now - lastUiSync >= 350) {
+        prevSpeaking = step.metrics.isSpeaking
+        lastUiSync = now
+        setIsSpeaking(step.metrics.isSpeaking)
+
+        const asrSnapshot = analyzerRef.current.getSnapshot(Math.max(1, elapsedSecondsRef.current))
+        if (asrSnapshot.totalWords === 0) {
+          const vadWpm = step.metrics.rollingWpm || step.metrics.overallWpm
+          setLiveWpm(vadWpm)
+          setLiveWordCount(step.metrics.estimatedWords)
+        }
+      }
+    }, 60)
+
+    return () => window.clearInterval(interval)
+  }, [addFlag, isPaused, language, phase])
 
   // 30-second auto-save to Supabase (FR-18, NFR-08)
   useEffect(() => {
@@ -1490,7 +1567,11 @@ export function VRStage({
       speakerIdx,
     )
     qaCountRef.current += 1
-    const seatIdx = Math.min(seats.length - 1, Math.floor(seats.length * 0.25) + (speakerIdx % Math.max(1, Math.min(5, seats.length))))
+    vrMicManager.resetQASpeakingTimer()
+    const seatIdx = Math.min(
+      seats.length - 1,
+      Math.floor(seats.length * 0.25) + (speakerIdx % Math.max(1, Math.min(5, seats.length))),
+    )
     const askingSeat = seats[seatIdx]
     const pan = askingSeat ? Math.max(-0.8, Math.min(0.8, askingSeat.x / 3.2)) : 0
 
@@ -1579,14 +1660,26 @@ export function VRStage({
     (text: string) => {
       const result = analyzerRef.current.ingestChunk(
         text,
-        elapsedSeconds,
+        elapsedSecondsRef.current,
         activeSetup.practiceType,
       )
       if (!result) return
 
       setLiveWpm(result.snapshot.rollingWpm)
+      setLiveWordCount(result.snapshot.totalWords)
       setLiveFillers(result.snapshot.fillerCount)
       setLiveCaption(text)
+
+      // Mark current topic covered when desktop ASR / simulated speech records content on this slide
+      const currentTopic = topicsRef.current[currentSlideIndexRef.current]
+      if (currentTopic) {
+        setCoveredIds((prev) => {
+          if (prev.has(currentTopic.id)) return prev
+          const copy = new Set(prev)
+          copy.add(currentTopic.id)
+          return copy
+        })
+      }
 
       if (result.detectedLongPause) {
         addFlag(
@@ -1636,7 +1729,7 @@ export function VRStage({
         )
       }
     },
-    [activeSetup.practiceType, addFlag, elapsedSeconds, language],
+    [activeSetup.practiceType, addFlag, language],
   )
 
   const handleSimulateSpeech = useCallback(() => {
@@ -1655,8 +1748,8 @@ export function VRStage({
     (nextIndex: number) => {
       const clamped = Math.max(0, Math.min(topics.length - 1, nextIndex))
       if (clamped !== currentSlideIndex) {
-        const dwellOnPrev = elapsedSeconds - slideEnteredAtRef.current
-        if (dwellOnPrev < 2 && elapsedSeconds > 2) {
+        const dwellOnPrev = elapsedSecondsRef.current - slideEnteredAtRef.current
+        if (dwellOnPrev < 2 && elapsedSecondsRef.current > 2) {
           const prevTopic = topics[currentSlideIndex]
           addFlag(
             'skipped_slide',
@@ -1672,21 +1765,12 @@ export function VRStage({
             },
           )
         }
-        slideEnteredAtRef.current = elapsedSeconds
+        slideEnteredAtRef.current = elapsedSecondsRef.current
+        vrMicManager.resetSlideSpeakingTimer()
       }
-
       setCurrentSlideIndex(clamped)
-      const topic = topics[clamped]
-      if (topic) {
-        setCoveredIds((prev) => {
-          if (prev.has(topic.id)) return prev
-          const copy = new Set(prev)
-          copy.add(topic.id)
-          return copy
-        })
-      }
     },
-    [addFlag, currentSlideIndex, elapsedSeconds, language, topics],
+    [addFlag, currentSlideIndex, language, topics],
   )
 
   const handleNextSlide = useCallback(() => {
@@ -1699,6 +1783,7 @@ export function VRStage({
 
   const handleReturnToSlide = useCallback(() => {
     vrAudioEngine.stopSpeech()
+    vrMicManager.resetQASpeakingTimer()
     setActiveQuestion(null)
     setAnswerSeconds(0)
     setHandRaisedIndex(null)
@@ -1709,6 +1794,7 @@ export function VRStage({
     if (!activeQuestion) return
     if (activeSetup.followUps && !activeQuestion.isFollowUp) {
       const followUp = generateFollowUpQuestion(activeQuestion, activeSetup, language)
+      vrMicManager.resetQASpeakingTimer()
       setActiveQuestion(followUp)
       setAnswerSeconds(0)
       setLiveCaption(`${followUp.speakerLabel}: “${followUp.text}”`)
@@ -1718,43 +1804,98 @@ export function VRStage({
     }
   }, [activeQuestion, activeSetup, handleReturnToSlide, language])
 
-  const resetSessionRun = (startSlide = 0, nextSetup?: SessionSetup) => {
-    if (nextSetup) setActiveSetup(nextSetup)
-    const targetTopics = nextSetup?.topics.length ? nextSetup.topics : topics
-    const safeSlide = Math.max(0, Math.min(targetTopics.length - 1, startSlide))
-    analyzerRef.current.reset()
-    gazeDwellRef.current = { left: 0, centre: 1, right: 0 }
-    slideEnteredAtRef.current = 0
-    simSpeechIndexRef.current = 0
-    qaCountRef.current = 0
-    oneMinWarnedRef.current = false
-    distractionCounterRef.current = 0
-    setSessionId(createSessionId())
-    setCurrentSlideIndex(safeSlide)
-    setCoveredIds(targetTopics[safeSlide] ? new Set([targetTopics[safeSlide].id]) : new Set())
-    setElapsedSeconds(0)
-    setLiveWpm(0)
-    setLiveFillers(0)
-    setFlaggedMoments([])
+  const resetSessionRun = useCallback(
+    (startSlide = 0, nextSetup?: SessionSetup) => {
+      // Guard against accidental double-triggers within 400ms
+      const now = performance.now()
+      if (now - lastSessionTransitionAtRef.current < 400) return
+      lastSessionTransitionAtRef.current = now
+
+      vrAudioEngine.unlock()
+      vrAudioEngine.stopSpeech()
+      vrAudioEngine.stopLobbyMusic(0.5)
+
+      if (nextSetup) setActiveSetup(nextSetup)
+      const targetTopics = nextSetup?.topics.length ? nextSetup.topics : topicsRef.current
+      const safeSlide = Math.max(0, Math.min(targetTopics.length - 1, startSlide))
+
+      analyzerRef.current.reset()
+      vrMicManager.resetVADSession()
+      gazeDwellRef.current = { left: 0, centre: 1, right: 0 }
+      uiHoveredCountRef.current = 0
+      slideEnteredAtRef.current = 0
+      simSpeechIndexRef.current = 0
+      qaCountRef.current = 0
+      oneMinWarnedRef.current = false
+      distractionCounterRef.current = 0
+
+      setSessionId(createSessionId())
+      setCurrentSlideIndex(safeSlide)
+      setCoveredIds(new Set())
+      setElapsedSeconds(0)
+      setLiveWpm(0)
+      setLiveWordCount(0)
+      setLiveFillers(0)
+      setIsSpeaking(false)
+      setFlaggedMoments([])
+      setActiveQuestion(null)
+      setAnswerSeconds(0)
+      setHandRaisedIndex(null)
+      setHintUsed(false)
+      setLastAutoSavedAt(null)
+      setCompletedRecord(null)
+      setLiveCaption(hudT.captionReady)
+      setIsPaused(false)
+      setPhase('active')
+    },
+    [hudT.captionReady],
+  )
+
+  // Subscribe 3D Floating VR Lobby to incoming phone pairing launches via Supabase Realtime
+  useEffect(() => {
+    if (phase !== 'vr_lobby') return
+    setLobbyPairingStatus('waiting')
+    const unsubscribe = subscribeHeadsetLobbyPairing(lobbyPairingCode, (phoneSetup) => {
+      setLobbyPairingStatus('paired')
+      window.setTimeout(() => {
+        resetSessionRun(0, phoneSetup)
+      }, 350)
+    })
+    return unsubscribe
+  }, [lobbyPairingCode, phase, resetSessionRun])
+
+  const handleEndSessionToDebrief = useCallback(async () => {
+    vrAudioEngine.stopSpeech()
+    uiHoveredCountRef.current = 0
     setActiveQuestion(null)
     setAnswerSeconds(0)
     setHandRaisedIndex(null)
-    setHintUsed(false)
-    setLastAutoSavedAt(null)
-    setCompletedRecord(null)
-    setLiveCaption(hudT.captionReady)
-    setIsPaused(false)
-    setPhase('active')
-  }
-
-  const handleEndSessionToDebrief = async () => {
-    vrAudioEngine.stopSpeech()
+    setIsSpeaking(false)
     setIsPaused(false)
     const finalRecord = snapshotCurrentRecord()
     await saveSessionSnapshot(userId, finalRecord)
     setCompletedRecord(finalRecord)
     setPhase('debrief')
-  }
+  }, [snapshotCurrentRecord, userId])
+
+  const handleExitToLobby = useCallback(() => {
+    vrAudioEngine.stopSpeech()
+    vrAudioEngine.stopRoomAmbience()
+    vrMicManager.resetVADSession()
+    analyzerRef.current.reset()
+    uiHoveredCountRef.current = 0
+    setCompletedRecord(null)
+    setActiveQuestion(null)
+    setAnswerSeconds(0)
+    setHandRaisedIndex(null)
+    setIsPaused(false)
+    setIsSpeaking(false)
+    setElapsedSeconds(0)
+    setLiveWpm(0)
+    setLiveWordCount(0)
+    setLiveFillers(0)
+    setPhase('vr_lobby')
+  }, [])
 
   const handleUseHint = useCallback(() => {
     const activeTopic = topics[currentSlideIndex]
@@ -2001,8 +2142,8 @@ export function VRStage({
           <XROrigin position={[0, playerOriginY, 0]} />
 
           <XRAudioAndTriggerBridge
+            phase={phase}
             isPaused={isPaused}
-            isVRLobby={isVRLobby}
             seatedHeightMode={seatedHeightMode}
             uiHoveredCountRef={uiHoveredCountRef}
             onPrevSlide={handlePrevSlide}
@@ -2065,11 +2206,11 @@ export function VRStage({
                 language={language}
                 onCalibrateGaze={handleCalibrateGaze}
                 onTestTrigger={() => setLobbyTriggerTested(true)}
-                onSelectVenue={(venue) =>
-                  setActiveSetup((prev) => ({ ...prev, venue }))
-                }
+                onSelectVenueAndStart={(venue) => {
+                  const nextSetup: SessionSetup = { ...activeSetup, venue }
+                  resetSessionRun(0, nextSetup)
+                }}
                 onStartPractice={() => {
-                  vrAudioEngine.unlock()
                   resetSessionRun(0, activeSetup)
                 }}
                 onRegenerateCode={() => {
@@ -2184,7 +2325,7 @@ export function VRStage({
                 timeUp={remainingSeconds === 0}
               />
 
-              {/* World-Space Interactive 3D Podium Console */}
+              {/* World-Space Interactive 3D Podium Console (0.58m W × 0.36m H) */}
               {phase === 'active' && (
                 <VRPodiumHUD
                   position={podiumHudPosition}
@@ -2196,7 +2337,9 @@ export function VRStage({
                   elapsedSeconds={elapsedSeconds}
                   remainingSeconds={remainingSeconds}
                   liveWpm={liveWpm}
+                  liveWordCount={liveWordCount}
                   liveFillers={liveFillers}
+                  isSpeaking={isSpeaking}
                   captionsEnabled={captionsEnabled}
                   liveCaption={liveCaption}
                   micStatus={micSnap.status}
@@ -2219,7 +2362,7 @@ export function VRStage({
                 />
               )}
 
-              {/* S2.2 / S2.2b / S2.3 Private Presenter Panel ("🔒 Only you see this") */}
+              {/* S2.2 / S2.2b / S2.3 Private Presenter Panel ("Only you see this") */}
               {phase === 'active' && (
                 <VRTeleprompterBoard
                   visible={panelVisible}
@@ -2266,6 +2409,8 @@ export function VRStage({
                   onUseHint={handleUseHint}
                   onResume={() => setIsPaused(false)}
                   onRestartCurrentSlide={() => {
+                    vrAudioEngine.stopSpeech()
+                    vrMicManager.resetSlideSpeakingTimer()
                     setIsPaused(false)
                     setLiveCaption(hudT.captionReady)
                   }}
@@ -2293,10 +2438,7 @@ export function VRStage({
                       onBackToPreFlight()
                     }
                   }}
-                  onExitToLobby={() => {
-                    setCompletedRecord(null)
-                    setPhase('vr_lobby')
-                  }}
+                  onExitToLobby={handleExitToLobby}
                   onHoverChange={handleUIHoverChange}
                 />
               )}
