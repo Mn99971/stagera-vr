@@ -12,6 +12,7 @@ import {
   SpeechDeliveryAnalyzer,
 } from '../ai/speechAnalyzer'
 import { translations } from '../lib/i18n'
+import { GroqLiveTranscriber } from '../lib/groqTranscriber'
 import {
   generateHeadsetLobbyCode,
   subscribeHeadsetLobbyPairing,
@@ -19,7 +20,6 @@ import {
 import {
   buildSessionRecord,
   createSessionId,
-  OptionalAudioRecorder,
   saveSessionSnapshot,
 } from '../lib/sessionRecorder'
 import { vrAudioEngine } from '../lib/vrAudioEngine'
@@ -1284,9 +1284,10 @@ export function VRStage({
     return () => window.clearTimeout(timer)
   }, [headsetBootMode])
 
-  // Speech delivery, Q&A, Auto-flagging & Debrief state
+  // Speech delivery, Groq Whisper live STT, Q&A, Auto-flagging & Debrief state
   const analyzerRef = useRef<SpeechDeliveryAnalyzer>(new SpeechDeliveryAnalyzer())
-  const audioRecorderRef = useRef<OptionalAudioRecorder>(new OptionalAudioRecorder())
+  const groqTranscriberRef = useRef<GroqLiveTranscriber>(new GroqLiveTranscriber())
+  const ingestTranscriptRef = useRef<(text: string) => void>(() => {})
   const gazeDwellRef = useRef<{ left: number; centre: number; right: number }>({
     left: 0,
     centre: 1,
@@ -1457,21 +1458,27 @@ export function VRStage({
     topics.length,
   ])
 
+  // Start/stop chunked Groq Whisper live STT cleanly on active/pause/resume/end
+  // (reuses unlocked vrMicManager stream; silently falls back to local VAD if unreachable)
   useEffect(() => {
-    if (phase === 'active') {
-      const existingStream = vrMicManager.getStream()
-      if (existingStream) {
-        void audioRecorderRef.current.start(existingStream)
-      }
+    if (phase === 'active' && !isPaused && micSnap.status === 'active') {
+      groqTranscriberRef.current.start({
+        language,
+        onTranscript: (text) => ingestTranscriptRef.current(text),
+      })
     } else {
-      audioRecorderRef.current.stop()
-      vrAudioEngine.stopSpeech()
+      groqTranscriberRef.current.stop()
+      if (phase !== 'active') {
+        vrAudioEngine.stopSpeech()
+      }
     }
     return () => {
-      audioRecorderRef.current.stop()
-      vrAudioEngine.stopSpeech()
+      groqTranscriberRef.current.stop()
+      if (phase !== 'active') {
+        vrAudioEngine.stopSpeech()
+      }
     }
-  }, [phase, micSnap.status])
+  }, [isPaused, language, micSnap.status, phase])
 
   useEffect(() => {
     if (phase !== 'active' || isPaused) return
@@ -1670,16 +1677,29 @@ export function VRStage({
       setLiveFillers(result.snapshot.fillerCount)
       setLiveCaption(text)
 
-      // Mark current topic covered when desktop ASR / simulated speech records content on this slide
+      // Mark current slide topic & any keyword-matched outline topic covered from real transcript
+      const lowerText = text.toLowerCase()
       const currentTopic = topicsRef.current[currentSlideIndexRef.current]
-      if (currentTopic) {
-        setCoveredIds((prev) => {
-          if (prev.has(currentTopic.id)) return prev
-          const copy = new Set(prev)
+      setCoveredIds((prev) => {
+        let changed = false
+        const copy = new Set(prev)
+        if (currentTopic && !copy.has(currentTopic.id)) {
           copy.add(currentTopic.id)
-          return copy
-        })
-      }
+          changed = true
+        }
+        for (const topic of topicsRef.current) {
+          if (copy.has(topic.id)) continue
+          const keywords = topic.title
+            .toLowerCase()
+            .split(/[^a-z0-9\u00C0-\u017F]+/)
+            .filter((w) => w.length >= 4)
+          if (keywords.some((kw) => lowerText.includes(kw))) {
+            copy.add(topic.id)
+            changed = true
+          }
+        }
+        return changed ? copy : prev
+      })
 
       if (result.detectedLongPause) {
         addFlag(
@@ -1731,6 +1751,7 @@ export function VRStage({
     },
     [activeSetup.practiceType, addFlag, language],
   )
+  ingestTranscriptRef.current = handleIngestTranscript
 
   const handleSimulateSpeech = useCallback(() => {
     const activeTopic = topics[currentSlideIndex]
@@ -1865,6 +1886,7 @@ export function VRStage({
   }, [lobbyPairingCode, phase, resetSessionRun])
 
   const handleEndSessionToDebrief = useCallback(async () => {
+    groqTranscriberRef.current.stop()
     vrAudioEngine.stopSpeech()
     uiHoveredCountRef.current = 0
     setActiveQuestion(null)
@@ -1879,6 +1901,7 @@ export function VRStage({
   }, [snapshotCurrentRecord, userId])
 
   const handleExitToLobby = useCallback(() => {
+    groqTranscriberRef.current.stop()
     vrAudioEngine.stopSpeech()
     vrAudioEngine.stopRoomAmbience()
     vrMicManager.resetVADSession()

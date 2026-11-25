@@ -116,6 +116,9 @@ export function PresenterHUD({
   const lastCommandAtRef = useRef(0)
 
   const getSpeechCtor = (): SpeechRecognitionCtor | null => {
+    if (typeof navigator !== 'undefined' && /OculusBrowser|Quest/i.test(navigator.userAgent)) {
+      return null
+    }
     const win = window as unknown as {
       SpeechRecognition?: SpeechRecognitionCtor
       webkitSpeechRecognition?: SpeechRecognitionCtor
@@ -152,9 +155,9 @@ export function PresenterHUD({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isPaused, onNextSlide, onPrevSlide, onTogglePanel, onTogglePause])
 
-  // Web Speech API: live transcription + slide voice commands ("next slide" / "previous slide")
+  // Web Speech API (desktop-only optional slide voice commands; disabled on Quest/XR where Groq Whisper runs)
   useEffect(() => {
-    if (!voiceActive || isPaused) {
+    if (!voiceActive || isPaused || isXRPresenting) {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop()
@@ -245,6 +248,7 @@ export function PresenterHUD({
   }, [
     voiceActive,
     isPaused,
+    isXRPresenting,
     language,
     onNextSlide,
     onPrevSlide,
