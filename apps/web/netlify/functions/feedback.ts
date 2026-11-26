@@ -21,6 +21,12 @@ interface NetlifyResponseLike {
 
 interface FeedbackRequestPayload {
   transcript?: string
+  qaTranscript?: Array<{
+    role: 'interviewer' | 'candidate'
+    speakerLabel: string
+    text: string
+    timestampSeconds: number
+  }>
   wpm?: number
   fillerCount?: number
   fillerBreakdown?: Record<string, number>
@@ -31,9 +37,11 @@ interface FeedbackRequestPayload {
   plannedTopics?: string[]
   coveredTopics?: string[]
   interviewContext?: {
+    roleTitle?: string
     jobDescription?: string
     cvSummary?: string
     projectSummary?: string
+    coachedMode?: boolean
     iCount?: number
     weCount?: number
   }
@@ -54,6 +62,10 @@ interface FlaggedMomentItem {
 }
 
 interface FeedbackResponsePayload {
+  overallScore: number
+  executiveSummary: string
+  strengths: string[]
+  areasToImprove: string[]
   quickTip: string
   topRecommendations: string[]
   goalFeedback: GoalFeedbackItem[]
@@ -82,8 +94,18 @@ function buildLocalFallback(p: FeedbackRequestPayload): FeedbackResponsePayload 
   const planned = p.plannedTopics ?? []
   const covered = p.coveredTopics ?? []
   const transcriptWords = (p.transcript ?? '').trim().split(/\s+/).filter(Boolean).length
-
   const topFiller = Object.entries(p.fillerBreakdown ?? {}).sort((a, b) => b[1] - a[1])[0]
+  const isInterview =
+    p.practiceType === 'interview' || p.venue === 'interview_room' || p.venue === 'panel_room'
+
+  let score = 74
+  if (wpm >= 120 && wpm <= 155) score += 10
+  else if (wpm > 0 && (wpm < 100 || wpm > 175)) score -= 8
+  if (fillers <= 3) score += 8
+  else if (fillers > 8) score -= 8
+  if (planned.length > 0 && covered.length / planned.length >= 0.8) score += 6
+  if (transcriptWords < 10) score = Math.min(score, 68)
+  const overallScore = Math.max(45, Math.min(98, score))
 
   const quickTip =
     transcriptWords < 10
@@ -93,6 +115,47 @@ function buildLocalFallback(p: FeedbackRequestPayload): FeedbackResponsePayload 
         : fillers > 3 && topFiller
           ? `Strong flow overall — replace "${topFiller[0]}" (${topFiller[1]}x) with a silent breath to sound even sharper.`
           : `Steady delivery at ${wpm || 132} WPM with ${fillers} filler words — keep sweeping the room on your next run.`
+
+  const executiveSummary =
+    transcriptWords < 10
+      ? `You completed a ${formatMMSS(durationSec)} warm-up ${isInterview ? 'interview' : 'rehearsal'} session. Do a fuller take so DeepSeek coaching can analyze your phrasing, storytelling depth, and transitions in detail.`
+      : `You delivered a ${formatMMSS(durationSec)} ${isInterview ? 'interview' : 'presentation'} at ${wpm || 132} WPM with ${fillers} detected filler word${fillers === 1 ? '' : 's'} and covered ${covered.length}/${Math.max(1, planned.length)} planned themes. ${wpm >= 120 && wpm <= 155 ? 'Your vocal cadence stayed comfortably inside the ideal clarity window.' : 'Adjusting pacing pauses between ideas will make your delivery even stronger.'}`
+
+  const strengths: string[] = []
+  if (wpm >= 115 && wpm <= 155) {
+    strengths.push(`Balanced speaking pace (${wpm} WPM) inside the optimal 120–150 WPM comprehension range.`)
+  }
+  if (fillers <= 3) {
+    strengths.push(`Clean verbal polish with only ${fillers} filler word${fillers === 1 ? '' : 's'} detected.`)
+  }
+  if (planned.length > 0 && covered.length >= Math.ceil(planned.length * 0.75)) {
+    strengths.push(`Strong structural coverage: addressed ${covered.length} of ${planned.length} planned points.`)
+  }
+  if (isInterview && (p.interviewContext?.iCount ?? 0) >= (p.interviewContext?.weCount ?? 0) && (p.interviewContext?.iCount ?? 0) > 0) {
+    strengths.push(`Clear personal ownership ("I": ${p.interviewContext?.iCount} vs "we": ${p.interviewContext?.weCount}).`)
+  }
+  if (strengths.length === 0) {
+    strengths.push(`Completed a focused ${formatMMSS(durationSec)} live VR rehearsal under realistic room conditions.`)
+  }
+
+  const areasToImprove: string[] = []
+  if (wpm > 155) {
+    areasToImprove.push(`Ease pace down from ${wpm} WPM toward 130–150 WPM using intentional 1-second pauses.`)
+  } else if (wpm > 0 && wpm < 115) {
+    areasToImprove.push(`Lift energy slightly from ${wpm} WPM toward 125–145 WPM with tighter transitions.`)
+  }
+  if (fillers > 3 && topFiller) {
+    areasToImprove.push(`Reduce "${topFiller[0]}" (${topFiller[1]}×) by pausing silently instead of bridging with filler words.`)
+  }
+  if (isInterview && (p.interviewContext?.weCount ?? 0) > (p.interviewContext?.iCount ?? 0)) {
+    areasToImprove.push(`Shift from "we" (${p.interviewContext?.weCount}) toward "I" (${p.interviewContext?.iCount}) to highlight your personal contribution.`)
+  }
+  if (planned.length > 0 && covered.length < planned.length) {
+    areasToImprove.push(`Cover remaining ${planned.length - covered.length} planned point(s) by budgeting time earlier in the session.`)
+  }
+  if (areasToImprove.length === 0) {
+    areasToImprove.push('Anchor each major point with one quantified metric or concrete example for maximum authority.')
+  }
 
   const topRecommendations: string[] = [
     wpm > 160
@@ -153,14 +216,32 @@ function buildLocalFallback(p: FeedbackRequestPayload): FeedbackResponsePayload 
     })
   }
 
-  return { quickTip, topRecommendations, goalFeedback, flaggedMoments }
+  return {
+    overallScore,
+    executiveSummary,
+    strengths,
+    areasToImprove,
+    quickTip,
+    topRecommendations,
+    goalFeedback,
+    flaggedMoments,
+  }
 }
 
 const SYSTEM_PROMPT = `You are an expert executive speaking & interview coach inside Stagera VR.
-Analyze the speaker's session metrics and transcript and respond ONLY with a valid JSON object matching this exact JSON schema (no markdown fences, no extra prose):
+Analyze the speaker's session metrics, Q&A transcript, CV/role context (if provided), and full transcript.
+Respond ONLY with a valid JSON object matching this exact JSON schema (no markdown fences, no extra prose):
 
 {
-  "quickTip": "1 concise sentence for the in-VR S2.6 debrief card",
+  "overallScore": 82,
+  "executiveSummary": "2-3 clear, human-readable sentences summarizing overall performance, delivery, and interview/presentation effectiveness.",
+  "strengths": [
+    "2 to 3 specific strengths referencing actual transcript/Q&A moments or metrics"
+  ],
+  "areasToImprove": [
+    "2 to 3 concrete areas to improve referencing actual moments or metrics"
+  ],
+  "quickTip": "1 concise sentence (<120 chars) for the in-VR S2.6 debrief card",
   "topRecommendations": [
     "3 specific, actionable tips referencing actual transcript moments/numbers"
   ],
@@ -183,9 +264,10 @@ Analyze the speaker's session metrics and transcript and respond ONLY with a val
 
 Rules:
 - Output strict JSON matching the schema above.
-- Always provide exactly 3 items in "topRecommendations".
+- "overallScore" must be an integer between 40 and 99 grounded in real delivery metrics & answer quality.
+- Always provide exactly 3 items in "topRecommendations", and 2-3 items each in "strengths" and "areasToImprove".
 - Keep "quickTip" under 125 characters so it fits cleanly on a VR headset debrief card.
-- If the transcript has fewer than 10 words, DO NOT invent or hallucinate fake quotes; give a brief, encouraging warm-up tip based only on the real metrics provided.`
+- If the transcript has fewer than 10 words, DO NOT invent or hallucinate fake quotes; give a brief, encouraging warm-up summary based only on the real metrics provided.`
 
 function normalizeStatus(raw: unknown): 'Strong' | 'Improving' | 'Needs work' {
   if (raw === 'Strong' || raw === 'Improving' || raw === 'Needs work') return raw
@@ -193,6 +275,53 @@ function normalizeStatus(raw: unknown): 'Strong' | 'Improving' | 'Needs work' {
   if (str.includes('strong') || str.includes('good') || str.includes('great')) return 'Strong'
   if (str.includes('need') || str.includes('work') || str.includes('weak')) return 'Needs work'
   return 'Improving'
+}
+
+async function callDeepSeekFeedback(
+  apiKey: string,
+  userPrompt: string,
+): Promise<string | null> {
+  const candidates = [process.env.DEEPSEEK_MODEL, 'deepseek-chat', 'deepseek-flash'].filter(
+    (m): m is string => typeof m === 'string' && m.trim().length > 0,
+  )
+  const models = Array.from(new Set(candidates))
+
+  for (const model of models) {
+    try {
+      const body: Record<string, unknown> = {
+        model,
+        response_format: { type: 'json_object' },
+        temperature: 0.4,
+        max_tokens: 950,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+      }
+      if (model.includes('flash')) {
+        body.thinking = { type: 'disabled' }
+      }
+
+      const resp = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (!resp.ok) continue
+      const data = (await resp.json()) as {
+        choices?: Array<{ message?: { content?: string } }>
+      }
+      const content = data.choices?.[0]?.message?.content?.trim()
+      if (content) return content
+    } catch {
+      // Try next candidate model
+    }
+  }
+  return null
 }
 
 export const handler = async (event: NetlifyEventLike): Promise<NetlifyResponseLike> => {
@@ -238,8 +367,15 @@ export const handler = async (event: NetlifyEventLike): Promise<NetlifyResponseL
   const wordCount = transcript ? transcript.split(/\s+/).filter(Boolean).length : 0
   const shortTranscriptNote =
     wordCount < 10
-      ? 'NOTE: Transcript has fewer than 10 words. Give a brief warm-up tip based on the metrics without inventing any fake quotes.'
+      ? 'NOTE: Transcript has fewer than 10 words. Give a brief warm-up summary based on the metrics without inventing any fake quotes.'
       : ''
+
+  const qaLines = Array.isArray(payload.qaTranscript) && payload.qaTranscript.length > 0
+    ? payload.qaTranscript
+        .slice(-14)
+        .map((t) => `[${formatMMSS(t.timestampSeconds)}] ${t.speakerLabel}: ${t.text}`)
+        .join('\n')
+    : ''
 
   const userPrompt = [
     `Practice type: ${payload.practiceType ?? 'presentation'} | Venue: ${payload.venue ?? 'auditorium'}`,
@@ -248,45 +384,16 @@ export const handler = async (event: NetlifyEventLike): Promise<NetlifyResponseL
     `Planned topics: ${JSON.stringify(payload.plannedTopics ?? [])}`,
     `Covered topics: ${JSON.stringify(payload.coveredTopics ?? [])}`,
     `Goals: ${JSON.stringify(payload.goals ?? [])}`,
-    payload.interviewContext ? `Interview context: ${JSON.stringify(payload.interviewContext)}` : '',
-    `Transcript (${wordCount} words): ${transcript || '(empty)'}`,
+    payload.interviewContext ? `Interview & CV context: ${JSON.stringify(payload.interviewContext)}` : '',
+    qaLines ? `Interview / Q&A Transcript:\n${qaLines}` : '',
+    `Speaker Transcript (${wordCount} words): ${transcript || '(empty)'}`,
     shortTranscriptNote,
   ]
     .filter(Boolean)
-    .join('\n')
+    .join('\n\n')
 
   try {
-    const resp = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-flash',
-        thinking: { type: 'disabled' },
-        response_format: { type: 'json_object' },
-        temperature: 0.4,
-        max_tokens: 700,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    })
-
-    if (!resp.ok) {
-      return {
-        statusCode: 200,
-        headers: CORS_HEADERS,
-        body: JSON.stringify(fallback),
-      }
-    }
-
-    const data = (await resp.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
-    }
-    const content = data.choices?.[0]?.message?.content?.trim() ?? ''
+    const content = await callDeepSeekFeedback(apiKey, userPrompt)
     if (!content) {
       return {
         statusCode: 200,
@@ -296,6 +403,30 @@ export const handler = async (event: NetlifyEventLike): Promise<NetlifyResponseL
     }
 
     const parsed = JSON.parse(content) as Partial<FeedbackResponsePayload>
+    const overallScore =
+      typeof parsed.overallScore === 'number' && Number.isFinite(parsed.overallScore)
+        ? Math.max(40, Math.min(99, Math.round(parsed.overallScore)))
+        : fallback.overallScore
+
+    const executiveSummary =
+      typeof parsed.executiveSummary === 'string' && parsed.executiveSummary.trim().length > 10
+        ? parsed.executiveSummary.trim()
+        : fallback.executiveSummary
+
+    const strengths =
+      Array.isArray(parsed.strengths) && parsed.strengths.length > 0
+        ? parsed.strengths
+            .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+            .slice(0, 4)
+        : fallback.strengths
+
+    const areasToImprove =
+      Array.isArray(parsed.areasToImprove) && parsed.areasToImprove.length > 0
+        ? parsed.areasToImprove
+            .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+            .slice(0, 4)
+        : fallback.areasToImprove
+
     const quickTip =
       typeof parsed.quickTip === 'string' && parsed.quickTip.trim().length > 0
         ? parsed.quickTip.trim()
@@ -331,6 +462,10 @@ export const handler = async (event: NetlifyEventLike): Promise<NetlifyResponseL
       : fallback.flaggedMoments
 
     const normalized: FeedbackResponsePayload = {
+      overallScore,
+      executiveSummary,
+      strengths: strengths.length > 0 ? strengths : fallback.strengths,
+      areasToImprove: areasToImprove.length > 0 ? areasToImprove : fallback.areasToImprove,
       quickTip,
       topRecommendations:
         topRecommendations.length > 0 ? topRecommendations : fallback.topRecommendations,

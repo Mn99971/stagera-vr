@@ -38,6 +38,26 @@ export interface InterviewDetails {
   cvFile: UploadedMaterialFile | null
 }
 
+export interface InterviewContext {
+  jobTitle?: string
+  jobDescription?: string
+  projectSummary?: string
+  cvFileName?: string
+  cvText?: string
+  cvHighlights?: string[]
+}
+
+export interface InterviewTurn {
+  id: string
+  role: 'interviewer' | 'candidate'
+  speakerLabel: string
+  speakerIndex?: number
+  text: string
+  timestampSeconds: number
+  isFollowUp?: boolean
+  coachingNote?: string
+}
+
 export interface SessionSetup {
   id?: string
   title: string
@@ -53,6 +73,7 @@ export interface SessionSetup {
   coachedMode: boolean
   goals: string[]
   topics: Topic[]
+  interviewContext?: InterviewContext
 }
 
 export interface UserProfile {
@@ -131,6 +152,10 @@ export interface AIFlaggedMomentItem {
 }
 
 export interface SessionAIFeedback {
+  overallScore?: number
+  executiveSummary?: string
+  strengths?: string[]
+  areasToImprove?: string[]
   quickTip: string
   topRecommendations: string[]
   goalFeedback: AIGoalFeedbackItem[]
@@ -156,6 +181,7 @@ export interface SessionRecord {
   iCount: number
   weCount: number
   transcript: string
+  qaTranscript?: InterviewTurn[]
   recommendations: string[]
   flaggedMoments: FlaggedMoment[]
   goals: string[]

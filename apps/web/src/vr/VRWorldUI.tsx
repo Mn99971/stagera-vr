@@ -323,6 +323,8 @@ export interface VRPodiumHUDProps {
   panelVisible: boolean
   isPaused: boolean
   hasActiveQuestion: boolean
+  isInterviewDriven?: boolean
+  interviewThinking?: boolean
   onPrevSlide: () => void
   onNextSlide: () => void
   onToggleQA: () => void
@@ -351,6 +353,8 @@ export function VRPodiumHUD({
   panelVisible,
   isPaused,
   hasActiveQuestion,
+  isInterviewDriven = false,
+  interviewThinking = false,
   onPrevSlide,
   onNextSlide,
   onToggleQA,
@@ -361,7 +365,7 @@ export function VRPodiumHUD({
   const totalSlides = Math.max(1, topics.length)
   const activeTopic = topics[currentSlideIndex]
   const nextTopic = topics[currentSlideIndex + 1]
-  const isInterview = setup.practiceType === 'interview'
+  const isInterview = isInterviewDriven || setup.practiceType === 'interview'
 
   const warnTime = setup.oneMinWarning && remainingSeconds > 0 && remainingSeconds <= 60
   const timeUp = remainingSeconds === 0
@@ -382,11 +386,13 @@ export function VRPodiumHUD({
   const voiceBadgeText =
     micStatus === 'denied' || micStatus === 'unsupported'
       ? 'MIC BLOCKED'
-      : isSpeaking
-        ? `● Speaking · ${liveWpm || 125} wpm`
-        : micStatus === 'active'
-          ? '● Listening...'
-          : 'MIC STANDBY'
+      : interviewThinking
+        ? '● AI Thinking…'
+        : isSpeaking
+          ? `● Speaking · ${liveWpm || 125} wpm`
+          : micStatus === 'active'
+            ? '● Listening...'
+            : 'MIC STANDBY'
 
   const counterStr = isInterview
     ? `Question ${currentSlideIndex + 1} of ${totalSlides}`
@@ -526,10 +532,18 @@ export function VRPodiumHUD({
         position={[0, -0.130, 0.015]}
         width={0.102}
         height={0.048}
-        label={hasActiveQuestion ? '✓ Done' : 'Q&A'}
-        fontSize={0.016}
+        label={
+          interviewThinking
+            ? 'Thinking…'
+            : hasActiveQuestion
+              ? isInterview
+                ? '✓ Next Q'
+                : '✓ Done'
+              : 'Q&A'
+        }
+        fontSize={0.0155}
         variant={hasActiveQuestion ? 'accent' : 'secondary'}
-        disabled={isPaused}
+        disabled={isPaused || interviewThinking}
         onClick={onToggleQA}
         onHoverChange={onHoverChange}
       />
@@ -573,6 +587,8 @@ export interface VRTeleprompterBoardProps {
   answerSeconds: number
   questionsRemaining: number
   followUpsEnabled: boolean
+  isInterviewDriven?: boolean
+  interviewThinking?: boolean
   onJumpToSlide: (idx: number) => void
   onFinishAnswer: () => void
   onReturnToSlide: () => void
@@ -591,6 +607,8 @@ export function VRTeleprompterBoard({
   answerSeconds,
   questionsRemaining,
   followUpsEnabled,
+  isInterviewDriven = false,
+  interviewThinking = false,
   onJumpToSlide,
   onFinishAnswer,
   onReturnToSlide,
@@ -599,7 +617,7 @@ export function VRTeleprompterBoard({
 }: VRTeleprompterBoardProps) {
   if (!visible && !activeQuestion) return null
 
-  const isInterview = setup.practiceType === 'interview'
+  const isInterview = isInterviewDriven || setup.practiceType === 'interview'
   const visibleTopics = topics.slice(0, 5)
   const panelW = 0.62
   const panelH = 0.62
@@ -641,7 +659,7 @@ export function VRTeleprompterBoard({
             anchorX="left"
             anchorY="middle"
           >
-            {`Answering · ${formatClock(answerSeconds)}`}
+            {interviewThinking ? 'Interviewer thinking…' : `Answering · ${formatClock(answerSeconds)}`}
           </Text>
           <Text
             position={[0.275, 0.225, 0.015]}
@@ -650,7 +668,7 @@ export function VRTeleprompterBoard({
             anchorX="right"
             anchorY="middle"
           >
-            Aim: under 0:45
+            {isInterview ? 'Aim: 0:30–1:00' : 'Aim: under 0:45'}
           </Text>
           <Text
             position={[-0.275, 0.184, 0.015]}
@@ -659,7 +677,9 @@ export function VRTeleprompterBoard({
             anchorX="left"
             anchorY="middle"
           >
-            {`Return to → Slide ${activeQuestion.slideIndex + 1}  ·  Questions left: ${questionsRemaining}`}
+            {isInterview
+              ? `${activeQuestion.speakerLabel}  ·  Dynamic AI Interview`
+              : `Return to → Slide ${activeQuestion.slideIndex + 1}  ·  Questions left: ${questionsRemaining}`}
           </Text>
 
           <RoundedPanel
@@ -677,17 +697,24 @@ export function VRTeleprompterBoard({
             anchorY="top"
             maxWidth={0.51}
           >
-            {`“${truncateText(activeQuestion.text, 140)}”`}
+            {`“${truncateText(activeQuestion.text, 145)}”`}
           </Text>
 
-          {followUpsEnabled && !activeQuestion.isFollowUp && (
+          {(isInterview || (followUpsEnabled && !activeQuestion.isFollowUp)) && (
             <VRButton3D
               position={[0, -0.145, 0.015]}
               width={0.54}
               height={0.064}
-              label="Done Answering → Ask Follow-Up"
-              fontSize={0.019}
+              label={
+                interviewThinking
+                  ? 'Interviewer formulating next question…'
+                  : isInterview
+                    ? 'Done Answering → Next Question'
+                    : 'Done Answering → Ask Follow-Up'
+              }
+              fontSize={0.0185}
               variant="primary"
+              disabled={interviewThinking}
               onClick={onFinishAnswer}
               onHoverChange={onHoverChange}
             />
@@ -696,10 +723,14 @@ export function VRTeleprompterBoard({
             position={[0, -0.230, 0.015]}
             width={0.54}
             height={0.064}
-            label={`Return to → Slide ${activeQuestion.slideIndex + 1}`}
+            label={
+              isInterview
+                ? 'Hide private panel (B)'
+                : `Return to → Slide ${activeQuestion.slideIndex + 1}`
+            }
             fontSize={0.019}
             variant="secondary"
-            onClick={onReturnToSlide}
+            onClick={isInterview ? onTogglePanel : onReturnToSlide}
             onHoverChange={onHoverChange}
           />
         </>
@@ -1186,6 +1217,8 @@ export interface VRDebriefPanel3DProps {
   record: SessionRecord
   language: AppLanguage
   feedbackLoading?: boolean
+  pairingCode?: string | null
+  phoneDeliveryState?: 'idle' | 'sent' | 'opened'
   onTryAgain: () => void
   onRaiseDifficulty: () => void
   onExitToReport: () => void
@@ -1196,6 +1229,8 @@ export interface VRDebriefPanel3DProps {
 export function VRDebriefPanel3D({
   record,
   feedbackLoading = false,
+  pairingCode = null,
+  phoneDeliveryState = 'idle',
   onTryAgain,
   onRaiseDifficulty,
   onExitToReport,
@@ -1215,6 +1250,13 @@ export function VRDebriefPanel3D({
       record.recommendations[0] ??
       'Great run! Review your full delivery breakdown on your phone.'
 
+  const phoneBtnLabel =
+    phoneDeliveryState === 'opened'
+      ? '✓ Opened on Paired Phone!'
+      : phoneDeliveryState === 'sent'
+        ? `✓ Sent to Phone${pairingCode ? ` (${pairingCode})` : ''} — Send Again`
+        : 'View full report (on phone)'
+
   return (
     <group position={[0, 1.48, -1.55]}>
       {/* Exact 0.95m W × 0.78m H */}
@@ -1231,7 +1273,7 @@ export function VRDebriefPanel3D({
         anchorX="left"
         anchorY="middle"
       >
-        QUICK DEBRIEF · S2.6
+        {`QUICK DEBRIEF · S2.6${pairingCode ? ` · LINK ${pairingCode}` : ''}`}
       </Text>
       <Text
         position={[-0.43, 0.285, 0.015]}
@@ -1320,9 +1362,9 @@ export function VRDebriefPanel3D({
         position={[-0.145, -0.295, 0.015]}
         width={0.57}
         height={0.074}
-        label="View full report (on phone)"
-        fontSize={0.021}
-        variant="primary"
+        label={phoneBtnLabel}
+        fontSize={0.020}
+        variant={phoneDeliveryState !== 'idle' ? 'accent' : 'primary'}
         onClick={onExitToReport}
         onHoverChange={onHoverChange}
       />

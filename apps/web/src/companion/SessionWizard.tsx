@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { extractTopics, getDefaultVenueForPracticeType } from '../ai/topicExtractor'
+import { extractCvHighlights } from '../lib/documentParser'
 import { translations } from '../lib/i18n'
 import type {
   AppLanguage,
@@ -202,6 +203,29 @@ export function SessionWizard({
 
     const fallbackTitle = deriveDefaultSessionTitle(type, files, interviewDetails, language)
 
+    const cvText = interviewDetails.cvFile?.extractedText?.trim().slice(0, 5500) || undefined
+    const hasInterviewData =
+      isInterview ||
+      venue === 'interview_room' ||
+      venue === 'panel_room' ||
+      Boolean(
+        interviewDetails.jobTitle.trim() ||
+          interviewDetails.jobDescription.trim() ||
+          interviewDetails.projectSummary.trim() ||
+          interviewDetails.cvFile,
+      )
+
+    const interviewContext = hasInterviewData
+      ? {
+          jobTitle: interviewDetails.jobTitle.trim() || undefined,
+          jobDescription: interviewDetails.jobDescription.trim().slice(0, 2500) || undefined,
+          projectSummary: interviewDetails.projectSummary.trim().slice(0, 2000) || undefined,
+          cvFileName: interviewDetails.cvFile?.name || undefined,
+          cvText,
+          cvHighlights: cvText ? extractCvHighlights(cvText) : undefined,
+        }
+      : undefined
+
     return {
       id: `setup-${Date.now().toString(36)}`,
       title: sessionTitle.trim() || fallbackTitle,
@@ -221,6 +245,7 @@ export function SessionWizard({
           ? profile.practiceGoals
           : ['steady_pace'],
       topics: cleanedTopics,
+      interviewContext,
     }
   }
 

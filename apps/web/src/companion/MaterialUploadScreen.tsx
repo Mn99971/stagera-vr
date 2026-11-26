@@ -4,6 +4,7 @@ import {
   formatFileSize,
   validateMaterialFile,
 } from '../ai/topicExtractor'
+import { parseUploadedDocument } from '../lib/documentParser'
 import { translations } from '../lib/i18n'
 import type { AppLanguage, UploadedMaterialFile } from '../types/stagera'
 
@@ -45,21 +46,15 @@ export function MaterialUploadScreen({
         continue
       }
 
-      let extractedText: string | undefined
-      if (check.extension === 'txt') {
-        try {
-          extractedText = await file.text()
-        } catch {
-          extractedText = undefined
-        }
-      }
+      const parsed = await parseUploadedDocument(file, check.extension)
 
       accepted.push({
         id: `file-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         name: file.name,
         sizeBytes: file.size,
         extension: check.extension,
-        extractedText,
+        extractedText: parsed.text || undefined,
+        estimatedSlides: parsed.estimatedSlides,
       })
     }
 

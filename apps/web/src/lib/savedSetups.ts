@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import type {
   AudienceBehaviour,
   InterruptionLevel,
+  InterviewContext,
   PracticeType,
   SessionSetup,
   Topic,
@@ -27,9 +28,10 @@ interface SavedSetupRow {
   coached_mode: boolean
   session_goals: string[] | null
   topics: Topic[] | null
+  interview_context?: InterviewContext | null
 }
 
-function mapRowToSetup(row: SavedSetupRow): SessionSetup {
+function mapRowToSetup(row: SavedSetupRow, localFallback?: SessionSetup): SessionSetup {
   return {
     id: row.id,
     title: row.title,
@@ -45,6 +47,7 @@ function mapRowToSetup(row: SavedSetupRow): SessionSetup {
     coachedMode: row.coached_mode,
     goals: row.session_goals ?? [],
     topics: Array.isArray(row.topics) ? row.topics : [],
+    interviewContext: row.interview_context ?? localFallback?.interviewContext,
   }
 }
 
@@ -68,6 +71,8 @@ function writeLocalSetups(setups: SessionSetup[]): void {
 }
 
 export async function loadSavedSetups(userId: string): Promise<SessionSetup[]> {
+  const local = readLocalSetups()
+
   if (supabase && !userId.startsWith('demo-')) {
     const { data, error } = await supabase
       .from('saved_setups')
@@ -76,13 +81,15 @@ export async function loadSavedSetups(userId: string): Promise<SessionSetup[]> {
       .order('created_at', { ascending: false })
 
     if (!error && data && data.length > 0) {
-      const mapped = (data as SavedSetupRow[]).map(mapRowToSetup)
+      const localById = new Map((local ?? []).map((s) => [s.id, s]))
+      const mapped = (data as SavedSetupRow[]).map((row) =>
+        mapRowToSetup(row, localById.get(row.id)),
+      )
       writeLocalSetups(mapped)
       return mapped
     }
   }
 
-  const local = readLocalSetups()
   if (local && local.length > 0) {
     return local
   }
@@ -99,29 +106,44 @@ export async function persistSavedSetup(
   }
 
   if (supabase && !userId.startsWith('demo-')) {
-    const { data, error } = await supabase
-      .from('saved_setups')
-      .insert({
-        user_id: userId,
-        title: setup.title,
-        practice_type: setup.practiceType,
-        venue: setup.venue,
-        audience_behaviour: setup.audienceBehaviour,
-        interruption_level: setup.interruptionLevel,
-        follow_ups: setup.followUps,
-        questions_at_end: setup.questionsAtEnd,
-        unexpected_questions: setup.unexpectedQuestions,
-        time_limit_minutes: setup.timeLimitMinutes,
-        one_min_warning: setup.oneMinWarning,
-        coached_mode: setup.coachedMode,
-        session_goals: setup.goals,
-        topics: setup.topics,
-      })
-      .select('*')
-      .single()
+    const baseRow = {
+      user_id: userId,
+      title: setup.title,
+      practice_type: setup.practiceType,
+      venue: setup.venue,
+      audience_behaviour: setup.audienceBehaviour,
+      interruption_level: setup.interruptionLevel,
+      follow_ups: setup.followUps,
+      questions_at_end: setup.questionsAtEnd,
+      unexpected_questions: setup.unexpectedQuestions,
+      time_limit_minutes: setup.timeLimitMinutes,
+      one_min_warning: setup.oneMinWarning,
+      coached_mode: setup.coachedMode,
+      session_goals: setup.goals,
+      topics: setup.topics,
+    }
 
-    if (!error && data) {
-      savedSetup = mapRowToSetup(data as SavedSetupRow)
+    // Try inserting with interview_context first (migration 0002), fall back cleanly to 0001 schema
+    const withContext = setup.interviewContext
+      ? await supabase
+          .from('saved_setups')
+          .insert({ ...baseRow, interview_context: setup.interviewContext })
+          .select('*')
+          .single()
+      : null
+
+    if (withContext && !withContext.error && withContext.data) {
+      savedSetup = mapRowToSetup(withContext.data as SavedSetupRow, setup)
+    } else {
+      const { data, error } = await supabase
+        .from('saved_setups')
+        .insert(baseRow)
+        .select('*')
+        .single()
+
+      if (!error && data) {
+        savedSetup = mapRowToSetup(data as SavedSetupRow, setup)
+      }
     }
   }
 

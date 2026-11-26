@@ -11,7 +11,7 @@ export const MAX_MATERIAL_FILE_BYTES = 25 * 1024 * 1024 // 25 MB (NFR-09)
 export const MAX_SLIDE_COUNT = 50 // 50 slides (NFR-09)
 
 export const ALLOWED_MATERIAL_EXTENSIONS = ['pptx', 'pdf', 'docx', 'txt'] as const
-export const ALLOWED_CV_EXTENSIONS = ['pdf', 'docx'] as const
+export const ALLOWED_CV_EXTENSIONS = ['pdf', 'docx', 'txt'] as const
 
 export interface FileValidationResult {
   valid: boolean
@@ -164,7 +164,8 @@ export function extractInterviewPreviewChips(
   const title = details.jobTitle.trim()
   const jd = details.jobDescription.trim()
   const project = details.projectSummary.trim()
-  const combined = `${title} ${jd} ${project}`
+  const cvText = details.cvFile?.extractedText?.trim() ?? ''
+  const combined = `${title} ${jd} ${project} ${cvText}`
 
   if (title) {
     addChip(
@@ -194,8 +195,12 @@ export function extractInterviewPreviewChips(
   if (details.cvFile) {
     addChip(
       language === 'fr'
-        ? 'Parcours et réalisations du CV'
-        : 'CV highlights & career progression',
+        ? cvText
+          ? `Parcours & projets (${details.cvFile.name.replace(/\.[^.]+$/, '').slice(0, 24)})`
+          : 'Parcours et réalisations du CV'
+        : cvText
+          ? `CV experience & projects (${details.cvFile.name.replace(/\.[^.]+$/, '').slice(0, 24)})`
+          : 'CV highlights & career progression',
     )
   }
 
