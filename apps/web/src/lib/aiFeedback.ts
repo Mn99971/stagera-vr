@@ -1,5 +1,6 @@
 import type {
   FlaggedMoment,
+  InterviewTurn,
   SessionAIFeedback,
   SessionRecord,
   SessionSetup,
@@ -8,6 +9,7 @@ import type {
 
 export interface AIFeedbackRequest {
   transcript: string
+  qaTranscript?: InterviewTurn[]
   wpm: number
   fillerCount: number
   fillerBreakdown: Record<string, number>
@@ -19,6 +21,9 @@ export interface AIFeedbackRequest {
   coveredTopics: string[]
   interviewContext?: {
     roleTitle?: string
+    jobDescription?: string
+    projectSummary?: string
+    cvSummary?: string
     coachedMode?: boolean
     iCount?: number
     weCount?: number
@@ -39,8 +44,15 @@ export async function requestSessionAIFeedback(
   topics: Topic[],
   coveredIds: Set<string>,
 ): Promise<SessionAIFeedback | null> {
+  const isInterview =
+    setup.practiceType === 'interview' ||
+    setup.venue === 'interview_room' ||
+    setup.venue === 'panel_room'
+
+  const ctx = setup.interviewContext
   const payload: AIFeedbackRequest = {
     transcript: record.transcript,
+    qaTranscript: record.qaTranscript?.length ? record.qaTranscript : undefined,
     wpm: record.wpm,
     fillerCount: record.fillerCount,
     fillerBreakdown: record.fillerBreakdown,
@@ -50,20 +62,22 @@ export async function requestSessionAIFeedback(
     venue: setup.venue,
     plannedTopics: topics.map((t) => t.title),
     coveredTopics: topics.filter((t) => coveredIds.has(t.id)).map((t) => t.title),
-    interviewContext:
-      setup.practiceType === 'interview'
-        ? {
-            roleTitle: setup.title,
-            coachedMode: setup.coachedMode,
-            iCount: record.iCount,
-            weCount: record.weCount,
-          }
-        : undefined,
+    interviewContext: isInterview
+      ? {
+          roleTitle: ctx?.jobTitle || setup.title,
+          jobDescription: ctx?.jobDescription?.slice(0, 1200),
+          projectSummary: ctx?.projectSummary?.slice(0, 1000),
+          cvSummary: ctx?.cvText?.slice(0, 1800),
+          coachedMode: setup.coachedMode,
+          iCount: record.iCount,
+          weCount: record.weCount,
+        }
+      : undefined,
     goals: setup.goals,
   }
 
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 12000)
+  const timeout = window.setTimeout(() => controller.abort(), 14000)
 
   try {
     const resp = await fetch('/.netlify/functions/feedback', {
@@ -78,6 +92,22 @@ export async function requestSessionAIFeedback(
       return null
     }
     return {
+      overallScore:
+        typeof data.overallScore === 'number' && Number.isFinite(data.overallScore)
+          ? Math.round(data.overallScore)
+          : undefined,
+      executiveSummary:
+        typeof data.executiveSummary === 'string' && data.executiveSummary.trim()
+          ? data.executiveSummary.trim()
+          : undefined,
+      strengths: Array.isArray(data.strengths)
+        ? data.strengths.filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
+        : undefined,
+      areasToImprove: Array.isArray(data.areasToImprove)
+        ? data.areasToImprove.filter(
+            (r): r is string => typeof r === 'string' && r.trim().length > 0,
+          )
+        : undefined,
       quickTip: data.quickTip.trim(),
       topRecommendations: Array.isArray(data.topRecommendations)
         ? data.topRecommendations.filter((r): r is string => typeof r === 'string' && r.trim().length > 0)

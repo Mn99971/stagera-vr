@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { translations } from '../lib/i18n'
+import { computeSessionSummary, exportSessionReportPdf } from '../lib/reportExport'
 import type { AppLanguage, FlaggedMoment, SessionRecord } from '../types/stagera'
 
 interface SessionReportScreenProps {
@@ -39,29 +41,49 @@ export function SessionReportScreen({
   const t = translations[language].step3.report
   const homeT = translations[language].home
   const hudT = translations[language].vr.hud
+  const isFr = language === 'fr'
 
-  const isInterview = record.practiceType === 'interview'
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const [pdfExported, setPdfExported] = useState(false)
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
+
+  const isInterview =
+    record.practiceType === 'interview' ||
+    record.venue === 'interview_room' ||
+    record.venue === 'panel_room'
   const fillerEntries = Object.entries(record.fillerBreakdown).sort((a, b) => b[1] - a[1])
   const missedTopics = Math.max(0, record.topicsTotal - record.topicsCovered)
   const par = checkParStructure(record.transcript)
   const totalPronouns = Math.max(1, record.iCount + record.weCount)
   const iPct = Math.round((record.iCount / totalPronouns) * 100)
+  const summary = computeSessionSummary(record, language)
 
   const recommendations =
     record.recommendations.length >= 3
       ? record.recommendations
       : [
           ...record.recommendations,
-          language === 'fr'
+          isFr
             ? 'Gardez un débit régulier entre 130 et 150 mots/min lors des transitions.'
             : 'Keep a steady cadence between 130 and 150 WPM during slide transitions.',
-          language === 'fr'
+          isFr
             ? 'Balayez les zones Gauche, Centre et Droite pour maintenir le contact visuel.'
             : 'Sweep Left, Centre, and Right audience zones to balance eye contact.',
-          language === 'fr'
+          isFr
             ? 'Terminez chaque réponse aux questions en moins de 45 secondes avec un exemple chiffré.'
             : 'Wrap up Q&A answers in under 45 seconds with one concrete metric.',
         ].slice(0, 3)
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true)
+    try {
+      await exportSessionReportPdf(record, language)
+      setPdfExported(true)
+      window.setTimeout(() => setPdfExported(false), 2600)
+    } finally {
+      setExportingPdf(false)
+    }
+  }
 
   return (
     <div className="report-shell">
@@ -78,7 +100,7 @@ export function SessionReportScreen({
             <span>·</span>
             <span>
               {new Date(record.createdAt).toLocaleDateString(
-                language === 'fr' ? 'fr-FR' : 'en-US',
+                isFr ? 'fr-FR' : 'en-US',
                 { month: 'short', day: 'numeric', year: 'numeric' },
               )}
             </span>
@@ -87,11 +109,130 @@ export function SessionReportScreen({
             </span>
           </div>
         </div>
+
+        <div className="report-export-actions no-print">
+          <button
+            id="report-export-pdf-btn"
+            type="button"
+            className="btn-primary"
+            style={{ width: 'auto', minWidth: 168 }}
+            disabled={exportingPdf}
+            onClick={() => void handleExportPdf()}
+          >
+            {exportingPdf
+              ? isFr
+                ? 'Génération PDF…'
+                : 'Generating PDF…'
+              : pdfExported
+                ? isFr
+                  ? '✓ PDF téléchargé'
+                  : '✓ PDF Downloaded'
+                : isFr
+                  ? 'Télécharger le PDF'
+                  : 'Export PDF Report'}
+          </button>
+          <button
+            id="report-print-btn"
+            type="button"
+            className="btn-secondary"
+            style={{ width: 'auto' }}
+            onClick={() => window.print()}
+          >
+            {isFr ? 'Imprimer' : 'Print'}
+          </button>
+        </div>
+      </div>
+
+      {/* Executive Summary & Overall Score */}
+      <section className="report-exec-card" aria-label={isFr ? 'Synthèse' : 'Executive Summary'}>
+        <div className="report-score-badge">
+          <span className="report-score-value">{summary.overallScore}</span>
+          <span className="report-score-denom">/ 100</span>
+          <span className="report-score-label">{summary.scoreLabel}</span>
+        </div>
+        <div className="report-exec-body">
+          <h2 className="dash-card-title" style={{ marginBottom: 6 }}>
+            {isFr ? 'Synthèse de la session' : 'Executive Summary'}
+          </h2>
+          <p className="report-exec-text">{summary.executiveSummary}</p>
+        </div>
+      </section>
+
+      {/* Core Delivery Metrics */}
+      <div className="debrief-metrics-grid">
+        <div className="debrief-metric-card">
+          <span className="debrief-metric-label">{homeT.metricWpm}</span>
+          <span className="debrief-metric-value">{record.wpm}</span>
+          <span className="debrief-metric-sub">{t.wpmTarget}</span>
+        </div>
+
+        <div className="debrief-metric-card">
+          <span className="debrief-metric-label">{homeT.metricFillers}</span>
+          <span className="debrief-metric-value">{record.fillerCount}</span>
+          <span className="debrief-metric-sub">{t.fillersByWord}</span>
+        </div>
+
+        <div className="debrief-metric-card">
+          <span className="debrief-metric-label">{homeT.metricTopics}</span>
+          <span className="debrief-metric-value">
+            {record.topicsCovered} / {record.topicsTotal}
+          </span>
+          <span className="debrief-metric-sub">
+            {missedTopics > 0
+              ? t.missedTopicsNote.replace('{missed}', String(missedTopics))
+              : t.allTopicsCovered}
+          </span>
+        </div>
+
+        <div className="debrief-metric-card">
+          <span className="debrief-metric-label">
+            {translations[language].vr.debrief.metricTime}
+          </span>
+          <span className="debrief-metric-value">{formatTime(record.durationSeconds)}</span>
+          <span className="debrief-metric-sub">
+            / {record.timeLimitMinutes}:00 {homeT.minUnit}
+          </span>
+        </div>
+      </div>
+
+      {/* Strengths & Areas to Improve */}
+      <div className="debrief-two-col">
+        <section className="dash-card report-strengths-card" style={{ marginBottom: 0 }}>
+          <h2 className="dash-card-title" style={{ marginBottom: 10 }}>
+            {isFr ? 'Points forts' : 'Key Strengths'}
+          </h2>
+          <ul className="report-bullet-list">
+            {summary.strengths.map((item, idx) => (
+              <li key={idx}>
+                <span className="report-bullet-icon ok" aria-hidden="true">
+                  ✓
+                </span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="dash-card report-improve-card" style={{ marginBottom: 0 }}>
+          <h2 className="dash-card-title" style={{ marginBottom: 10 }}>
+            {isFr ? 'Axes d’amélioration' : 'Areas to Improve'}
+          </h2>
+          <ul className="report-bullet-list">
+            {summary.areasToImprove.map((item, idx) => (
+              <li key={idx}>
+                <span className="report-bullet-icon focus" aria-hidden="true">
+                  →
+                </span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
 
       {/* S3.1b Goal-First Feedback (prefers real DeepSeek AI goal feedback when present) */}
       {(record.aiFeedback?.goalFeedback.length || record.goals.length > 0 || isInterview) && (
-        <section className="dash-card" aria-label={t.goalsHeading}>
+        <section className="dash-card" style={{ marginBottom: 0 }} aria-label={t.goalsHeading}>
           <h2 className="dash-card-title" style={{ marginBottom: 10 }}>
             {t.goalsHeading}
           </h2>
@@ -165,42 +306,36 @@ export function SessionReportScreen({
         </section>
       )}
 
-      {/* Core Delivery Metrics */}
-      <div className="debrief-metrics-grid">
-        <div className="debrief-metric-card">
-          <span className="debrief-metric-label">{homeT.metricWpm}</span>
-          <span className="debrief-metric-value">{record.wpm}</span>
-          <span className="debrief-metric-sub">{t.wpmTarget}</span>
-        </div>
-
-        <div className="debrief-metric-card">
-          <span className="debrief-metric-label">{homeT.metricFillers}</span>
-          <span className="debrief-metric-value">{record.fillerCount}</span>
-          <span className="debrief-metric-sub">{t.fillersByWord}</span>
-        </div>
-
-        <div className="debrief-metric-card">
-          <span className="debrief-metric-label">{homeT.metricTopics}</span>
-          <span className="debrief-metric-value">
-            {record.topicsCovered} / {record.topicsTotal}
-          </span>
-          <span className="debrief-metric-sub">
-            {missedTopics > 0
-              ? t.missedTopicsNote.replace('{missed}', String(missedTopics))
-              : t.allTopicsCovered}
-          </span>
-        </div>
-
-        <div className="debrief-metric-card">
-          <span className="debrief-metric-label">
-            {translations[language].vr.debrief.metricTime}
-          </span>
-          <span className="debrief-metric-value">{formatTime(record.durationSeconds)}</span>
-          <span className="debrief-metric-sub">
-            / {record.timeLimitMinutes}:00 {homeT.minUnit}
-          </span>
-        </div>
-      </div>
+      {/* Interview / Q&A Conversation Breakdown */}
+      {record.qaTranscript && record.qaTranscript.length > 0 && (
+        <section className="dash-card" style={{ marginBottom: 0 }}>
+          <h2 className="dash-card-title" style={{ marginBottom: 12 }}>
+            {isFr ? 'Déroulé Q&R de l’entretien' : 'Interview Q&A Breakdown'}
+          </h2>
+          <div className="qa-breakdown-list">
+            {record.qaTranscript.map((turn) => (
+              <div key={turn.id} className={`qa-turn-row ${turn.role}`}>
+                <div className="qa-turn-meta">
+                  <span className="qa-turn-speaker">{turn.speakerLabel}</span>
+                  <span className="qa-turn-time">{formatTime(turn.timestampSeconds)}</span>
+                  {turn.isFollowUp && (
+                    <span className="wizard-type-pill">
+                      {isFr ? 'Relance' : 'Follow-up'}
+                    </span>
+                  )}
+                </div>
+                <p className="qa-turn-text">{turn.text}</p>
+                {turn.coachingNote && (
+                  <p className="qa-turn-note">
+                    {isFr ? 'Conseil : ' : 'Coach note: '}
+                    {turn.coachingNote}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Filler Breakdown by Word + Eye-Contact Zone Bar */}
       <div className="debrief-two-col">
@@ -226,7 +361,11 @@ export function SessionReportScreen({
           <h2 className="dash-card-title" style={{ marginBottom: 10 }}>
             {t.eyeContactTitle}
           </h2>
-          <div className="gaze-zone-bar" role="img" aria-label={`Left ${record.eyeContactZones.left}%, Centre ${record.eyeContactZones.centre}%, Right ${record.eyeContactZones.right}%`}>
+          <div
+            className="gaze-zone-bar"
+            role="img"
+            aria-label={`Left ${record.eyeContactZones.left}%, Centre ${record.eyeContactZones.centre}%, Right ${record.eyeContactZones.right}%`}
+          >
             <div
               className="gaze-seg left"
               style={{ width: `${Math.max(8, record.eyeContactZones.left)}%` }}
@@ -247,9 +386,15 @@ export function SessionReportScreen({
             </div>
           </div>
           <div className="gaze-legend">
-            <span>{hudT.gazeZoneLeft}: {record.eyeContactZones.left}%</span>
-            <span>{hudT.gazeZoneCentre}: {record.eyeContactZones.centre}%</span>
-            <span>{hudT.gazeZoneRight}: {record.eyeContactZones.right}%</span>
+            <span>
+              {hudT.gazeZoneLeft}: {record.eyeContactZones.left}%
+            </span>
+            <span>
+              {hudT.gazeZoneCentre}: {record.eyeContactZones.centre}%
+            </span>
+            <span>
+              {hudT.gazeZoneRight}: {record.eyeContactZones.right}%
+            </span>
           </div>
         </div>
       </div>
@@ -271,7 +416,7 @@ export function SessionReportScreen({
                 {linkedMoment && (
                   <button
                     type="button"
-                    className="link-btn"
+                    className="link-btn no-print"
                     style={{ alignSelf: 'flex-start', marginLeft: 34, fontSize: 12.5 }}
                     onClick={() => onOpenMomentReplay(linkedMoment)}
                   >
@@ -284,8 +429,33 @@ export function SessionReportScreen({
         </ol>
       </div>
 
+      {/* Readable Transcript Preview */}
+      {record.transcript && record.transcript.trim().length > 0 && (
+        <section className="dash-card" style={{ marginBottom: 0 }}>
+          <div className="dash-card-header" style={{ marginBottom: transcriptOpen ? 10 : 0 }}>
+            <h2 className="dash-card-title">
+              {isFr ? 'Transcription' : 'Session Transcript'}
+            </h2>
+            <button
+              type="button"
+              className="btn-small-ghost no-print"
+              onClick={() => setTranscriptOpen((prev) => !prev)}
+            >
+              {transcriptOpen
+                ? isFr
+                  ? 'Masquer'
+                  : 'Hide'
+                : isFr
+                  ? 'Afficher la transcription'
+                  : 'Show Transcript'}
+            </button>
+          </div>
+          {transcriptOpen && <p className="report-transcript-body">{record.transcript}</p>}
+        </section>
+      )}
+
       {/* Primary Report Actions */}
-      <div className="report-action-bar">
+      <div className="report-action-bar no-print">
         <button
           id="report-flagged-moments-btn"
           type="button"

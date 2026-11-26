@@ -5,6 +5,7 @@ import {
   formatFileSize,
   validateMaterialFile,
 } from '../ai/topicExtractor'
+import { extractCvHighlights, parseUploadedDocument } from '../lib/documentParser'
 import { translations } from '../lib/i18n'
 import type { AppLanguage, InterviewDetails, UploadedMaterialFile } from '../types/stagera'
 
@@ -26,28 +27,55 @@ export function InterviewDetailsScreen({
   const t = translations[language].wizard
   const cvInputRef = useRef<HTMLInputElement | null>(null)
   const [cvError, setCvError] = useState<string | null>(null)
+  const [cvWarning, setCvWarning] = useState<string | null>(null)
+  const [isParsingCv, setIsParsingCv] = useState(false)
 
   const previewChips = useMemo(
     () => extractInterviewPreviewChips(details, language),
     [details, language],
   )
 
-  const handleCvSelected = (fileList: FileList | null) => {
+  const cvHighlights = useMemo(
+    () => (details.cvFile?.extractedText ? extractCvHighlights(details.cvFile.extractedText).slice(0, 3) : []),
+    [details.cvFile?.extractedText],
+  )
+
+  const handleCvSelected = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
     setCvError(null)
+    setCvWarning(null)
     const file = fileList[0]
     const check = validateMaterialFile(file, ALLOWED_CV_EXTENSIONS)
     if (!check.valid) {
       setCvError(check.reason === 'size' ? t.interview.cvErrSize : t.interview.cvErrType)
       return
     }
-    const cvFile: UploadedMaterialFile = {
+
+    const baseCvFile: UploadedMaterialFile = {
       id: `cv-${Date.now().toString(36)}`,
       name: file.name,
       sizeBytes: file.size,
       extension: check.extension,
     }
-    onChange({ ...details, cvFile })
+    onChange({ ...details, cvFile: baseCvFile })
+
+    setIsParsingCv(true)
+    try {
+      const parsed = await parseUploadedDocument(file, check.extension)
+      if (parsed.warning) {
+        setCvWarning(parsed.warning)
+      }
+      onChange({
+        ...details,
+        cvFile: {
+          ...baseCvFile,
+          extractedText: parsed.text || undefined,
+          estimatedSlides: parsed.estimatedSlides,
+        },
+      })
+    } finally {
+      setIsParsingCv(false)
+    }
   }
 
   return (
@@ -108,31 +136,61 @@ export function InterviewDetailsScreen({
             ref={cvInputRef}
             id="interview-cv-input"
             type="file"
-            accept=".pdf,.docx"
+            accept=".pdf,.docx,.txt"
             className="sr-only"
             onChange={(e) => {
-              handleCvSelected(e.target.files)
+              void handleCvSelected(e.target.files)
               e.target.value = ''
             }}
           />
 
           {details.cvFile ? (
-            <div className="uploaded-file-row">
-              <div className="uploaded-file-info">
-                <span className="file-ext-badge">{details.cvFile.extension.toUpperCase()}</span>
-                <div className="uploaded-file-text">
-                  <span className="uploaded-file-name">{details.cvFile.name}</span>
-                  <span className="uploaded-file-size">{formatFileSize(details.cvFile.sizeBytes)}</span>
+            <div className="cv-uploaded-card">
+              <div className="uploaded-file-row">
+                <div className="uploaded-file-info">
+                  <span className="file-ext-badge">{details.cvFile.extension.toUpperCase()}</span>
+                  <div className="uploaded-file-text">
+                    <span className="uploaded-file-name">{details.cvFile.name}</span>
+                    <span className="uploaded-file-size">
+                      {formatFileSize(details.cvFile.sizeBytes)}
+                      {isParsingCv
+                        ? language === 'fr'
+                          ? ' · Analyse du CV…'
+                          : ' · Extracting CV text…'
+                        : details.cvFile.extractedText
+                          ? language === 'fr'
+                            ? ` · ✓ ${details.cvFile.extractedText.length.toLocaleString()} car. prêts pour l’IA`
+                            : ` · ✓ ${details.cvFile.extractedText.length.toLocaleString()} chars ready for AI interviewer`
+                          : ''}
+                    </span>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  className="btn-remove-inline"
+                  aria-label={`${t.interview.removeCv} ${details.cvFile.name}`}
+                  onClick={() => {
+                    setCvWarning(null)
+                    onChange({ ...details, cvFile: null })
+                  }}
+                >
+                  {t.interview.removeCv}
+                </button>
               </div>
-              <button
-                type="button"
-                className="btn-remove-inline"
-                aria-label={`${t.interview.removeCv} ${details.cvFile.name}`}
-                onClick={() => onChange({ ...details, cvFile: null })}
-              >
-                {t.interview.removeCv}
-              </button>
+              {cvHighlights.length > 0 && (
+                <div className="cv-extracted-preview" aria-live="polite">
+                  <span className="cv-extracted-label">
+                    {language === 'fr'
+                      ? 'Points détectés dans votre CV :'
+                      : 'Detected CV highlights (used by AI interviewer):'}
+                  </span>
+                  <ul className="cv-extracted-list">
+                    {cvHighlights.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           ) : (
             <button
@@ -144,6 +202,12 @@ export function InterviewDetailsScreen({
               <span className="cv-upload-title">{t.interview.cvDropzoneTitle}</span>
               <span className="cv-upload-sub">{t.interview.cvDropzoneLimit}</span>
             </button>
+          )}
+
+          {cvWarning && (
+            <div className="cv-warning-note" role="status">
+              {cvWarning}
+            </div>
           )}
 
           {cvError && (

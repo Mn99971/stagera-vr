@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { translations } from '../lib/i18n'
+import { exportAllSessionsSummaryPdf } from '../lib/reportExport'
 import { downloadUserDataExport } from '../lib/sessionStore'
 import type {
   AppLanguage,
@@ -35,8 +36,10 @@ export function PrivacySettingsScreen({
   const homeT = translations[language].home
   const profileT = translations[language].profile
   const t = translations[language].step3.privacy
+  const isFr = language === 'fr'
 
   const [exportToast, setExportToast] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
   const [deletedNotice, setDeletedNotice] = useState(false)
 
@@ -171,14 +174,39 @@ export function PrivacySettingsScreen({
           <button
             id="settings-export-data-btn"
             type="button"
-            className="btn-secondary"
+            className="btn-primary"
+            disabled={exportingPdf}
             onClick={() => {
-              downloadUserDataExport(profile, savedSetups, sessions)
-              setExportToast(true)
-              window.setTimeout(() => setExportToast(false), 2500)
+              setExportingPdf(true)
+              void exportAllSessionsSummaryPdf(profile, sessions, language)
+                .then(() => {
+                  setExportToast(true)
+                  window.setTimeout(() => setExportToast(false), 2600)
+                })
+                .finally(() => setExportingPdf(false))
             }}
           >
-            {exportToast ? t.exportDone : t.exportDataBtn}
+            {exportingPdf
+              ? isFr
+                ? 'Génération du PDF…'
+                : 'Generating PDF…'
+              : exportToast
+                ? isFr
+                  ? '✓ Rapport PDF téléchargé'
+                  : '✓ PDF report downloaded'
+                : isFr
+                  ? 'Exporter mes rapports (PDF)'
+                  : 'Export Session Reports (PDF)'}
+          </button>
+
+          <button
+            id="settings-export-json-dev-btn"
+            type="button"
+            className="link-btn"
+            style={{ alignSelf: 'center', fontSize: 12, opacity: 0.7 }}
+            onClick={() => downloadUserDataExport(profile, savedSetups, sessions)}
+          >
+            {isFr ? 'Sauvegarde brute (JSON développeur)' : 'Developer raw backup (JSON)'}
           </button>
 
           {!confirmDeleteAll ? (

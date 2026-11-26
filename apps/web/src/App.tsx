@@ -1,8 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CompanionFlow } from './companion/CompanionFlow'
 import { Step3ReportFlow } from './companion/Step3ReportFlow'
 import { getStoredLanguage, setStoredLanguage } from './lib/auth'
 import { translations } from './lib/i18n'
+import {
+  clearActivePhoneLink,
+  createPhonePersistentLink,
+  loadActivePhoneLink,
+  type PhonePairingPhase,
+  type PhonePersistentLink,
+} from './lib/pairing'
+import { saveSessionSnapshot } from './lib/sessionRecorder'
 import {
   deleteAllRecordings,
   deleteSessionRecord,
@@ -13,6 +21,13 @@ import {
 import type { AppLanguage, SessionRecord, SessionSetup } from './types/stagera'
 import { VRPreFlight } from './vr/VRPreFlight'
 import { VRStage } from './vr/VRStage'
+
+export interface ActivePhoneLinkView {
+  code: string
+  phase: PhonePairingPhase
+  message: string
+  setupTitle: string
+}
 
 const DEFAULT_HEADSET_SETUP: SessionSetup = {
   id: 'headset-quick-lobby',
@@ -58,6 +73,13 @@ export function App() {
   const [captionsEnabled, setCaptionsEnabled] = useState(true)
   const [language, setLanguage] = useState<AppLanguage>(() => getStoredLanguage())
 
+  // Persistent Phone <-> Headset Session Link state (survives screens, tab sleep, and reloads)
+  const phoneLinkRef = useRef<PhonePersistentLink | null>(null)
+  const [phoneLinkState, setPhoneLinkState] = useState<ActivePhoneLinkView | null>(null)
+  const [reportReceivedNotice, setReportReceivedNotice] = useState<string | null>(null)
+  const userIdRef = useRef<string | undefined>(userId)
+  userIdRef.current = userId
+
   useEffect(() => {
     document.documentElement.lang = language
   }, [language])
@@ -71,6 +93,73 @@ export function App() {
       active = false
     }
   }, [userId])
+
+  const handleDisconnectPhoneLink = useCallback(() => {
+    phoneLinkRef.current?.disconnect()
+    phoneLinkRef.current = null
+    clearActivePhoneLink()
+    setPhoneLinkState(null)
+  }, [])
+
+  const handleConnectPhoneLink = useCallback(
+    (code: string, setup: SessionSetup | null, isReconnect = false) => {
+      const cleaned = code.replace(/\D/g, '').slice(0, 4)
+      if (cleaned.length !== 4) return
+
+      // Reuse existing live link for same code if launching a new setup
+      if (phoneLinkRef.current && phoneLinkRef.current.code === cleaned && setup && !isReconnect) {
+        phoneLinkRef.current.sendLaunchSetup(setup)
+        setPhoneLinkState((prev) => ({
+          code: cleaned,
+          phase: 'waiting_headset',
+          message: 'Sending session to headset…',
+          setupTitle: setup.title || prev?.setupTitle || 'VR Session',
+        }))
+        return
+      }
+
+      phoneLinkRef.current?.disconnect()
+      const setupTitle = setup?.title ?? loadActivePhoneLink()?.setupTitle ?? 'VR Session'
+
+      const link = createPhonePersistentLink({
+        rawCode: cleaned,
+        setup,
+        isReconnect,
+        onUpdate: (update) => {
+          setPhoneLinkState({
+            code: update.code || cleaned,
+            phase: update.phase,
+            message: update.message,
+            setupTitle,
+          })
+        },
+        onReportReady: (record) => {
+          void saveSessionSnapshot(userIdRef.current ?? 'demo-phone', record)
+          setAllSessions((prev) => [record, ...prev.filter((item) => item.id !== record.id)])
+          setSelectedReport(record)
+          setStep('report')
+          setReportReceivedNotice(
+            `✓ Report received from VR headset (Code ${cleaned}) — "${record.title}"`,
+          )
+        },
+      })
+      phoneLinkRef.current = link
+    },
+    [],
+  )
+
+  // Auto-reconnect persistent phone link on mount / page refresh
+  useEffect(() => {
+    if (isHeadset && !forceWeb2D) return
+    const persisted = loadActivePhoneLink()
+    if (persisted) {
+      handleConnectPhoneLink(persisted.code, null, true)
+    }
+    return () => {
+      phoneLinkRef.current?.disconnect()
+      phoneLinkRef.current = null
+    }
+  }, [forceWeb2D, handleConnectPhoneLink, isHeadset])
 
   const handleLanguageChange = (next: AppLanguage) => {
     setLanguage(next)
@@ -130,10 +219,16 @@ export function App() {
 
   const t = translations[language].app
   const activeReportRecord = selectedReport ?? allSessions[0] ?? SAMPLE_SESSION_RECORDS[0]
+  const showPersistentLinkBar =
+    phoneLinkState !== null &&
+    (phoneLinkState.phase === 'connected' ||
+      phoneLinkState.phase === 'in_session' ||
+      phoneLinkState.phase === 'generating_report' ||
+      phoneLinkState.phase === 'report_ready')
 
   return (
     <div className="stagera-shell">
-      <header className="stagera-topbar">
+      <header className="stagera-topbar no-print">
         <div className="stagera-topbar-inner">
           <div className="stagera-brand">
             <span className="stagera-brand-mark" aria-hidden="true">
@@ -158,11 +253,42 @@ export function App() {
         </div>
       </header>
 
+      {showPersistentLinkBar && phoneLinkState && (
+        <div className="persistent-link-bar no-print" role="status" aria-live="polite">
+          <div className="persistent-link-info">
+            <span className="persistent-link-dot" aria-hidden="true" />
+            <span>{phoneLinkState.message}</span>
+          </div>
+          <div className="persistent-link-actions">
+            <button
+              id="persistent-link-resync-btn"
+              type="button"
+              className="btn-small-ghost"
+              onClick={() => phoneLinkRef.current?.requestSync()}
+            >
+              {language === 'fr' ? '↻ Synchroniser' : '↻ Re-sync'}
+            </button>
+            <button
+              id="persistent-link-disconnect-btn"
+              type="button"
+              className="btn-small-ghost"
+              onClick={handleDisconnectPhoneLink}
+            >
+              {language === 'fr' ? 'Déconnecter' : 'Unlink'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <main className="stagera-main">
         {step === 'setup' && (
           <CompanionFlow
             language={language}
             sessions={allSessions}
+            phoneLinkState={phoneLinkState}
+            onConnectHeadset={(code, setup) => handleConnectPhoneLink(code, setup, false)}
+            onResyncHeadset={() => phoneLinkRef.current?.requestSync()}
+            onDisconnectHeadset={handleDisconnectPhoneLink}
             onLanguageChange={handleLanguageChange}
             onLaunchVR={(setup) => {
               setActiveSetup(setup)
@@ -211,15 +337,29 @@ export function App() {
         )}
 
         {step === 'report' && (
-          <Step3ReportFlow
-            record={activeReportRecord}
-            allSessions={allSessions}
-            language={language}
-            onLaunchVRWithSetup={(setup) => {
-              setActiveSetup(setup)
-              setStep('vr')
-            }}
-          />
+          <>
+            {reportReceivedNotice && (
+              <div className="report-handoff-banner no-print" role="status">
+                <span>{reportReceivedNotice}</span>
+                <button
+                  type="button"
+                  className="btn-small-ghost"
+                  onClick={() => setReportReceivedNotice(null)}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            <Step3ReportFlow
+              record={activeReportRecord}
+              allSessions={allSessions}
+              language={language}
+              onLaunchVRWithSetup={(setup) => {
+                setActiveSetup(setup)
+                setStep('vr')
+              }}
+            />
+          </>
         )}
       </main>
     </div>

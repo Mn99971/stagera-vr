@@ -3,6 +3,10 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { XR, XROrigin, createXRStore } from '@react-three/xr'
 import * as THREE from 'three'
 import {
+  isInterviewDrivenSession,
+  requestNextInterviewQuestion,
+} from '../ai/interviewEngine'
+import {
   generateAudienceQuestion,
   generateFollowUpQuestion,
   type QAQuestion,
@@ -18,8 +22,9 @@ import {
 } from '../lib/aiFeedback'
 import { GroqLiveTranscriber } from '../lib/groqTranscriber'
 import {
+  createHeadsetPersistentLink,
   generateHeadsetLobbyCode,
-  subscribeHeadsetLobbyPairing,
+  type HeadsetPersistentLink,
 } from '../lib/pairing'
 import {
   buildSessionRecord,
@@ -35,6 +40,7 @@ import type {
   FlaggedMomentType,
   GazeZones,
   InterruptionLevel,
+  InterviewTurn,
   SessionRecord,
   SessionSetup,
   Topic,
@@ -639,10 +645,17 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
 
   return (
     <group>
-      {/* Main Room Floor strictly at y = 0 */}
+      {/* Main Room Floor strictly at y = 0 with positive polygonOffset so floor never Z-fights */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, centerZ]}>
         <planeGeometry args={[dim.width, dim.depth]} />
-        <meshStandardMaterial color={palette.floor} roughness={0.82} metalness={0.04} />
+        <meshStandardMaterial
+          color={palette.floor}
+          roughness={0.82}
+          metalness={0.04}
+          polygonOffset
+          polygonOffsetFactor={1}
+          polygonOffsetUnits={1}
+        />
       </mesh>
 
       {/* Ceiling */}
@@ -772,31 +785,31 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
 
       {!isTableVenue && (
         <group>
-          {/* Natural Oak Stage Deck: top sits flush at y = 0.00 so player NEVER sinks below floor */}
-          <mesh position={[0, -0.02, -0.25]}>
+          {/* Natural Oak Stage Deck: cleanly raised +0.02m above Main Room Floor (zero Z-fighting) */}
+          <mesh position={[0, 0.01, -0.25]}>
             <boxGeometry
               args={[
                 venue === 'auditorium' ? 12.0 : venue === 'lecture_hall' ? 8.6 : 6.4,
-                0.04,
+                0.02,
                 3.4,
               ]}
             />
             <meshStandardMaterial color={palette.wood} roughness={0.6} />
           </mesh>
-          {/* Stage apron edge trim separated +0.02m above floor */}
-          <mesh position={[0, 0.02, -1.94]}>
+          {/* Stage apron edge trim capping the front edge of the stage deck (zero overlap) */}
+          <mesh position={[0, 0.014, -1.968]}>
             <boxGeometry
               args={[
                 venue === 'auditorium' ? 12.0 : venue === 'lecture_hall' ? 8.6 : 6.4,
-                0.022,
-                0.045,
+                0.028,
+                0.036,
               ]}
             />
             <meshStandardMaterial color="#14b8a6" emissive="#0d9488" emissiveIntensity={0.85} />
           </mesh>
 
-          {/* Natural Oak 3D Architectural Podium: 0.66m W × 1.05m H × 0.48m D at z = -0.68m */}
-          <group position={[0, 0, -0.68]}>
+          {/* Natural Oak 3D Architectural Podium resting flush on stage top (y = 0.02) */}
+          <group position={[0, 0.02, -0.68]}>
             <mesh position={[0, 0.035, 0]}>
               <boxGeometry args={[0.64, 0.07, 0.48]} />
               <meshStandardMaterial color="#334155" roughness={0.45} metalness={0.4} />
@@ -817,20 +830,21 @@ function VenueArchitecture({ venue }: { venue: VenueType }) {
             </mesh>
           </group>
 
-          {/* Tiered Seating Risers for Lecture Hall & Auditorium */}
+          {/* Tiered Seating Risers for Lecture Hall & Auditorium (start at row >= 1; row 0 rests on main floor at y = 0) */}
           {(venue === 'lecture_hall' || venue === 'auditorium') &&
             Array.from({ length: venue === 'auditorium' ? 10 : 6 }, (_, row) => {
+              if (row === 0) return null
               const rise = venue === 'auditorium' ? 0.20 : 0.18
               const spacingZ = venue === 'auditorium' ? 1.08 : 1.12
               const startZ = venue === 'auditorium' ? -3.45 : -3.15
-              const riserHeight = Math.max(0.08, (row + 1) * rise)
+              const riserHeight = row * rise
               const riserWidth = venue === 'auditorium' ? 19.6 : 11.4
               return (
                 <mesh
                   key={row}
-                  position={[0, riserHeight / 2 - rise, startZ - row * spacingZ]}
+                  position={[0, riserHeight / 2, startZ - row * spacingZ]}
                 >
-                  <boxGeometry args={[riserWidth, riserHeight, spacingZ - 0.05]} />
+                  <boxGeometry args={[riserWidth, riserHeight, spacingZ - 0.06]} />
                   <meshStandardMaterial color="#475569" roughness={0.88} />
                 </mesh>
               )
@@ -1195,7 +1209,8 @@ export function VRStage({
   const seats = useMemo(() => computeVenueSeats(activeSetup.venue), [activeSetup.venue])
 
   const totalLimitSeconds = Math.max(60, activeSetup.timeLimitMinutes * 60)
-  const isInterview = activeSetup.practiceType === 'interview'
+  const isInterviewDriven = isInterviewDrivenSession(activeSetup)
+  const isInterview = isInterviewDriven
 
   const [phase, setPhase] = useState<StagePhase>(() =>
     headsetBootMode ? 'vr_lobby' : 'lobby',
@@ -1204,6 +1219,8 @@ export function VRStage({
     pairingCode && pairingCode.length === 4 ? pairingCode : generateHeadsetLobbyCode(),
   )
   const [lobbyPairingStatus, setLobbyPairingStatus] = useState<'waiting' | 'paired'>('waiting')
+  const [phoneDeliveryState, setPhoneDeliveryState] = useState<'idle' | 'sent' | 'opened'>('idle')
+  const headsetLinkRef = useRef<HeadsetPersistentLink | null>(null)
 
   // S2.1 In-VR Pre-Flight Checklist State
   const [lobbyMicPassed, setLobbyMicPassed] = useState(false)
@@ -1237,6 +1254,17 @@ export function VRStage({
   const oneMinWarnedRef = useRef(false)
   const distractionCounterRef = useRef(0)
   const lastSessionTransitionAtRef = useRef(0)
+
+  // Dynamic DeepSeek Interview state (Single Interview & Panel Interview ONLY)
+  const [interviewThinking, setInterviewThinking] = useState(false)
+  const interviewHistoryRef = useRef<InterviewTurn[]>([])
+  const currentAnswerBufferRef = useRef<string[]>([])
+  const lastPanelistIndexRef = useRef<number>(0)
+  const interviewOpeningSentRef = useRef<boolean>(false)
+  const interviewRequestSeqRef = useRef<number>(0)
+  const lastCandidateSpeechAtRef = useRef<number>(0)
+  const interviewThinkingRef = useRef<boolean>(false)
+  interviewThinkingRef.current = interviewThinking
 
   useEffect(() => {
     const unsubMic = vrMicManager.subscribe(setMicSnap)
@@ -1312,15 +1340,19 @@ export function VRStage({
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string | null>(null)
   const [completedRecord, setCompletedRecord] = useState<SessionRecord | null>(null)
 
-  // Keep refs in sync for the 60ms VAD interval so it never needs to re-subscribe
+  // Keep refs in sync for the 60ms VAD interval & dynamic interview hooks
   const activeQuestionRef = useRef<QAQuestion | null>(null)
   const currentSlideIndexRef = useRef(0)
   const topicsRef = useRef<Topic[]>(topics)
   const elapsedSecondsRef = useRef(0)
+  const activeSetupRef = useRef<SessionSetup>(activeSetup)
+  const seatsRef = useRef<SeatTransform[]>(seats)
   activeQuestionRef.current = activeQuestion
   currentSlideIndexRef.current = currentSlideIndex
   topicsRef.current = topics
   elapsedSecondsRef.current = elapsedSeconds
+  activeSetupRef.current = activeSetup
+  seatsRef.current = seats
 
   // Prevent stuck raycast hover count whenever UI screens mount/unmount
   useEffect(() => {
@@ -1431,6 +1463,19 @@ export function VRStage({
     const useVadFallback = speech.totalWords === 0 && vad.estimatedWords > 0
     const effectiveWpm = useVadFallback ? vad.overallWpm || vad.rollingWpm : speech.overallWpm
 
+    // Flush any pending candidate answer text into qaTranscript snapshot without mutating live buffer
+    const pendingCandidateText = currentAnswerBufferRef.current.join(' ').trim()
+    const qaTranscript: InterviewTurn[] = [...interviewHistoryRef.current]
+    if (pendingCandidateText) {
+      qaTranscript.push({
+        id: `cand-final-${Date.now().toString(36)}`,
+        role: 'candidate',
+        speakerLabel: language === 'fr' ? 'Vous' : 'You',
+        text: pendingCandidateText,
+        timestampSeconds: elapsedSeconds,
+      })
+    }
+
     return buildSessionRecord({
       sessionId,
       setup: activeSetup,
@@ -1446,6 +1491,7 @@ export function VRStage({
       weCount: speech.weCount,
       hintUsed,
       transcript: speech.transcript,
+      qaTranscript: qaTranscript.length > 0 ? qaTranscript : undefined,
       flaggedMoments,
       vadWordCount: useVadFallback ? vad.estimatedWords : undefined,
       vadSpeakingSeconds: useVadFallback ? vad.speakingDurationSeconds : undefined,
@@ -1494,8 +1540,6 @@ export function VRStage({
   }, [isPaused, phase])
 
   // Real-Time Quest Audio VAD & Syllable Pace Tracker loop (~60ms cadence)
-  // Drives live WPM, word count, speaking badge, >3.5s pause flags & auto slide coverage
-  // whenever SpeechRecognition is unavailable or emits 0 words (Meta Quest Browser).
   useEffect(() => {
     if (phase !== 'active' || isPaused) {
       setIsSpeaking(false)
@@ -1506,6 +1550,10 @@ export function VRStage({
 
     const interval = window.setInterval(() => {
       const step = vrMicManager.stepVAD(0.06, { inQA: activeQuestionRef.current !== null })
+
+      if (step.metrics.isSpeaking) {
+        lastCandidateSpeechAtRef.current = performance.now()
+      }
 
       if (step.slideCoveredNow) {
         const currentTopic = topicsRef.current[currentSlideIndexRef.current]
@@ -1519,7 +1567,7 @@ export function VRStage({
         }
       }
 
-      if (step.detectedLongPause) {
+      if (step.detectedLongPause && !isInterviewDrivenSession(activeSetupRef.current)) {
         addFlag(
           'long_pause',
           language === 'fr'
@@ -1567,7 +1615,188 @@ export function VRStage({
     })
   }, [elapsedSeconds, isPaused, phase, snapshotCurrentRecord, userId])
 
+  /**
+   * Dynamic DeepSeek Interview Turn Driver (STRICTLY for Single Interview & Panel Interview modes).
+   * - action === 'opening': delivers a realistic opening question grounded in role + CV.
+   * - action === 'respond': takes the candidate's actual response + history + CV and generates a
+   *   contextual follow-up or probing question (rotating across the 3 panelists in Panel mode).
+   */
+  const runDynamicInterviewTurn = useCallback(
+    async (action: 'opening' | 'respond', explicitCandidateAnswer?: string) => {
+      const setupNow = activeSetupRef.current
+      if (!isInterviewDrivenSession(setupNow)) return
+      if (interviewThinkingRef.current) return
+
+      const reqSeq = ++interviewRequestSeqRef.current
+      setInterviewThinking(true)
+      interviewThinkingRef.current = true
+      vrAudioEngine.stopSpeech()
+
+      let latestAnswer = (explicitCandidateAnswer ?? '').trim()
+      if (action === 'respond') {
+        const buffered = currentAnswerBufferRef.current.join(' ').trim()
+        if (!latestAnswer) {
+          latestAnswer = buffered
+        } else if (buffered && !latestAnswer.includes(buffered)) {
+          latestAnswer = `${buffered} ${latestAnswer}`.trim()
+        }
+        currentAnswerBufferRef.current = []
+
+        if (latestAnswer) {
+          interviewHistoryRef.current = [
+            ...interviewHistoryRef.current,
+            {
+              id: `cand-${Date.now().toString(36)}-${qaCountRef.current}`,
+              role: 'candidate',
+              speakerLabel: language === 'fr' ? 'Vous' : 'You',
+              text: latestAnswer,
+              timestampSeconds: elapsedSecondsRef.current,
+            },
+          ]
+        }
+      }
+
+      setLiveCaption(
+        language === 'fr'
+          ? '● Le recruteur IA prépare sa prochaine question…'
+          : '● AI Interviewer formulating next question…',
+      )
+
+      const nextTopicIdx =
+        action === 'opening'
+          ? 0
+          : Math.min(topicsRef.current.length - 1, Math.floor((qaCountRef.current + 1) / 2))
+
+      try {
+        const turn = await requestNextInterviewQuestion({
+          action,
+          setup: setupNow,
+          topics: topicsRef.current,
+          language,
+          questionCount: qaCountRef.current,
+          lastPanelistIndex: lastPanelistIndexRef.current,
+          latestCandidateAnswer: latestAnswer || undefined,
+          conversationHistory: interviewHistoryRef.current,
+          slideIndex: nextTopicIdx,
+        })
+
+        // Ignore stale response if session was reset or ended while waiting
+        if (reqSeq !== interviewRequestSeqRef.current) return
+
+        qaCountRef.current += 1
+        lastPanelistIndexRef.current = turn.speakerIndex
+        lastCandidateSpeechAtRef.current = 0
+        vrMicManager.resetQASpeakingTimer()
+
+        const currentSeats = seatsRef.current
+        const seatIdx = Math.max(0, Math.min(currentSeats.length - 1, turn.speakerIndex))
+        const askingSeat = currentSeats[seatIdx]
+        const pan = askingSeat ? Math.max(-0.8, Math.min(0.8, askingSeat.x / 2.2)) : 0
+
+        interviewHistoryRef.current = [
+          ...interviewHistoryRef.current,
+          {
+            id: turn.question.id,
+            role: 'interviewer',
+            speakerLabel: turn.question.speakerLabel,
+            speakerIndex: turn.speakerIndex,
+            text: turn.question.text,
+            timestampSeconds: elapsedSecondsRef.current,
+            isFollowUp: turn.question.isFollowUp,
+            coachingNote: turn.coachingNote,
+          },
+        ]
+
+        setCurrentSlideIndex(nextTopicIdx)
+        const activeT = topicsRef.current[nextTopicIdx]
+        if (activeT) {
+          setCoveredIds((prev) => {
+            if (prev.has(activeT.id)) return prev
+            const next = new Set(prev)
+            next.add(activeT.id)
+            return next
+          })
+        }
+
+        setHandRaisedIndex(seatIdx)
+        setActiveQuestion(turn.question)
+        setAnswerSeconds(0)
+        setLiveCaption(`${turn.question.speakerLabel}: “${turn.question.text}”`)
+
+        vrAudioEngine.playHandRaiseChime(pan)
+        window.setTimeout(() => {
+          if (reqSeq === interviewRequestSeqRef.current) {
+            vrAudioEngine.speakAudienceVoice(turn.question.text, language, turn.speakerIndex)
+          }
+        }, 260)
+
+        addFlag('question', `${turn.question.speakerLabel}: ${turn.question.topicTitle}`, {
+          transcriptExcerpt: turn.question.text,
+          aiTip: turn.coachingNote,
+          slideIndex: nextTopicIdx,
+        })
+      } finally {
+        if (reqSeq === interviewRequestSeqRef.current) {
+          setInterviewThinking(false)
+          interviewThinkingRef.current = false
+        }
+      }
+    },
+    [addFlag, language],
+  )
+
+  // Auto-start Interview with realistic DeepSeek opening question (ONLY in Interview / Panel modes!)
+  useEffect(() => {
+    if (phase !== 'active' || isPaused || !isInterviewDriven || interviewOpeningSentRef.current) {
+      return
+    }
+    interviewOpeningSentRef.current = true
+    const timer = window.setTimeout(() => {
+      void runDynamicInterviewTurn('opening')
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [isInterviewDriven, isPaused, phase, runDynamicInterviewTurn])
+
+  // Natural conversational pause turn-taking in Interview modes:
+  // After the candidate speaks a response and pauses cleanly (~3.4s silence), AI interviewer replies dynamically.
+  useEffect(() => {
+    if (phase !== 'active' || isPaused || !isInterviewDriven) return
+    const checker = window.setInterval(() => {
+      if (!activeQuestionRef.current || interviewThinkingRef.current) return
+      if (typeof window !== 'undefined' && window.speechSynthesis?.speaking) return
+
+      const bufferedWords = currentAnswerBufferRef.current
+        .join(' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean).length
+      const vad = vrMicManager.getVADMetrics()
+      const hasSpokenEnough = bufferedWords >= 6 || vad.speakingDurationSeconds >= 4.5
+      if (!hasSpokenEnough) return
+
+      const lastSpeechAt = lastCandidateSpeechAtRef.current
+      if (lastSpeechAt > 0 && performance.now() - lastSpeechAt >= 3400 && !vad.isSpeaking) {
+        lastCandidateSpeechAtRef.current = 0
+        void runDynamicInterviewTurn('respond')
+      }
+    }, 500)
+    return () => window.clearInterval(checker)
+  }, [isInterviewDriven, isPaused, phase, runDynamicInterviewTurn])
+
+  /**
+   * Presenter-led Audience Q&A trigger (for Presentation / Classroom / Lecture Hall / Auditorium / Pitch).
+   * In Interview modes, delegates cleanly to the dynamic DeepSeek interviewer!
+   */
   const triggerQuestion = useCallback(() => {
+    if (isInterviewDrivenSession(activeSetup)) {
+      if (!activeQuestionRef.current) {
+        void runDynamicInterviewTurn(qaCountRef.current === 0 ? 'opening' : 'respond')
+      } else {
+        void runDynamicInterviewTurn('respond')
+      }
+      return
+    }
+
     const activeTopic = topics[currentSlideIndex]
     const speakerIdx = qaCountRef.current
     const question = generateAudienceQuestion(
@@ -1604,66 +1833,46 @@ export function VRStage({
           : 'Aim to answer in under 45 seconds with one concrete example, then bridge back to your slide.',
       slideIndex: currentSlideIndex,
     })
-  }, [activeSetup, addFlag, currentSlideIndex, language, seats, topics])
+  }, [activeSetup, addFlag, currentSlideIndex, language, runDynamicInterviewTurn, seats, topics])
 
-  // Automatic contextual Q&A interruptions at configured interruptionLevel rate
+  // Note: Presentation & Auditorium modes stay strictly presenter-led (NO automatic Q&A interruption timer!).
+  // Only subtle room ambience/distraction SFX play when audienceBehaviour === 'distracted'.
   useEffect(() => {
     if (
       phase !== 'active' ||
       isPaused ||
       activeQuestion !== null ||
-      activeSetup.interruptionLevel === 'none'
+      elapsedSeconds === 0 ||
+      isInterviewDriven
     ) {
       return
     }
-    const intervalSec =
-      activeSetup.interruptionLevel === 'high'
-        ? 35
-        : activeSetup.interruptionLevel === 'medium'
-          ? 55
-          : 85
-    if (elapsedSeconds > 0 && elapsedSeconds % intervalSec === 0) {
-      triggerQuestion()
-    }
-  }, [activeQuestion, activeSetup.interruptionLevel, elapsedSeconds, isPaused, phase, triggerQuestion])
-
-  // S2.4 Distracted Audience & Room Interruption Stereo SFX Engine
-  useEffect(() => {
-    if (phase !== 'active' || isPaused || activeQuestion !== null || elapsedSeconds === 0) {
-      return
-    }
     const isDistracted = activeSetup.audienceBehaviour === 'distracted'
-    const cadence = isDistracted ? 18 : activeSetup.interruptionLevel === 'high' ? 24 : 38
+    if (!isDistracted && activeSetup.interruptionLevel === 'none') return
+    const cadence = isDistracted ? 22 : activeSetup.interruptionLevel === 'high' ? 30 : 45
     if (elapsedSeconds % cadence !== 0) return
 
     const idx = distractionCounterRef.current
     distractionCounterRef.current += 1
     const pan = idx % 2 === 0 ? -0.62 : 0.62
 
-    const eventKind = idx % 5
+    const eventKind = idx % 4
     if (eventKind === 0) {
       vrAudioEngine.playPhoneBuzz(pan)
     } else if (eventKind === 1) {
       vrAudioEngine.playWhisperBurst(pan)
     } else if (eventKind === 2) {
       vrAudioEngine.playThroatClear(pan)
-    } else if (eventKind === 3) {
+    } else {
       vrAudioEngine.playLateArrival(pan)
-    } else if (isDistracted) {
-      const verbalLine =
-        language === 'fr'
-          ? 'Excusez-moi, pouvez-vous répéter la dernière partie ?'
-          : 'Sorry, can you repeat the last part?'
-      setLiveCaption(`Audience: “${verbalLine}”`)
-      vrAudioEngine.speakAudienceVoice(verbalLine, language, idx)
     }
   }, [
     activeQuestion,
     activeSetup.audienceBehaviour,
     activeSetup.interruptionLevel,
     elapsedSeconds,
+    isInterviewDriven,
     isPaused,
-    language,
     phase,
   ])
 
@@ -1680,6 +1889,12 @@ export function VRStage({
       setLiveWordCount(result.snapshot.totalWords)
       setLiveFillers(result.snapshot.fillerCount)
       setLiveCaption(text)
+
+      // Accumulate candidate's spoken answer for the active interview question
+      if (isInterviewDrivenSession(activeSetupRef.current) && activeQuestionRef.current) {
+        currentAnswerBufferRef.current.push(text)
+        lastCandidateSpeechAtRef.current = performance.now()
+      }
 
       // Mark current slide topic & any keyword-matched outline topic covered from real transcript
       const lowerText = text.toLowerCase()
@@ -1769,6 +1984,16 @@ export function VRStage({
     handleIngestTranscript(sample)
   }, [activeSetup.practiceType, activeSetup.title, currentSlideIndex, handleIngestTranscript, language, topics])
 
+  const handleSubmitTypedAnswer = useCallback(
+    (answer: string) => {
+      handleIngestTranscript(answer)
+      if (isInterviewDrivenSession(activeSetupRef.current)) {
+        void runDynamicInterviewTurn('respond', answer)
+      }
+    },
+    [handleIngestTranscript, runDynamicInterviewTurn],
+  )
+
   const goToSlide = useCallback(
     (nextIndex: number) => {
       const clamped = Math.max(0, Math.min(topics.length - 1, nextIndex))
@@ -1816,6 +2041,10 @@ export function VRStage({
   }, [hudT.captionReady])
 
   const handleFinishAnswer = useCallback(() => {
+    if (isInterviewDrivenSession(activeSetup)) {
+      void runDynamicInterviewTurn('respond')
+      return
+    }
     if (!activeQuestion) return
     if (activeSetup.followUps && !activeQuestion.isFollowUp) {
       const followUp = generateFollowUpQuestion(activeQuestion, activeSetup, language)
@@ -1827,7 +2056,7 @@ export function VRStage({
     } else {
       handleReturnToSlide()
     }
-  }, [activeQuestion, activeSetup, handleReturnToSlide, language])
+  }, [activeQuestion, activeSetup, handleReturnToSlide, language, runDynamicInterviewTurn])
 
   const resetSessionRun = useCallback(
     (startSlide = 0, nextSetup?: SessionSetup) => {
@@ -1840,8 +2069,12 @@ export function VRStage({
       vrAudioEngine.stopSpeech()
       vrAudioEngine.stopLobbyMusic(0.5)
 
-      if (nextSetup) setActiveSetup(nextSetup)
-      const targetTopics = nextSetup?.topics.length ? nextSetup.topics : topicsRef.current
+      if (nextSetup) {
+        setActiveSetup(nextSetup)
+        activeSetupRef.current = nextSetup
+      }
+      const effectiveSetup = nextSetup ?? activeSetupRef.current
+      const targetTopics = effectiveSetup.topics.length ? effectiveSetup.topics : topicsRef.current
       const safeSlide = Math.max(0, Math.min(targetTopics.length - 1, startSlide))
 
       analyzerRef.current.reset()
@@ -1853,6 +2086,12 @@ export function VRStage({
       qaCountRef.current = 0
       oneMinWarnedRef.current = false
       distractionCounterRef.current = 0
+      interviewHistoryRef.current = []
+      currentAnswerBufferRef.current = []
+      lastPanelistIndexRef.current = 0
+      interviewOpeningSentRef.current = false
+      interviewRequestSeqRef.current += 1
+      lastCandidateSpeechAtRef.current = 0
 
       setSessionId(createSessionId())
       setCurrentSlideIndex(safeSlide)
@@ -1864,23 +2103,25 @@ export function VRStage({
       setIsSpeaking(false)
       setFlaggedMoments([])
       setActiveQuestion(null)
+      setInterviewThinking(false)
       setAnswerSeconds(0)
       setHandRaisedIndex(null)
       setHintUsed(false)
       setLastAutoSavedAt(null)
       setCompletedRecord(null)
+      setPhoneDeliveryState('idle')
       setLiveCaption(hudT.captionReady)
       setIsPaused(false)
       setPhase('active')
+
+      headsetLinkRef.current?.updateStatus('in_session', effectiveSetup.title)
     },
     [hudT.captionReady],
   )
 
-  // Subscribe 3D Floating VR Lobby to unified `stagera-pair-<code>` Supabase Realtime Broadcast channel
+  // Persistent Headset <-> Phone Link: stays connected across vr_lobby -> active -> debrief!
   useEffect(() => {
-    if (phase !== 'vr_lobby') return
-    setLobbyPairingStatus('waiting')
-    const unsubscribe = subscribeHeadsetLobbyPairing(lobbyPairingCode, {
+    const link = createHeadsetPersistentLink(lobbyPairingCode, {
       onPaired: () => {
         setLobbyPairingStatus('paired')
       },
@@ -1888,34 +2129,47 @@ export function VRStage({
         setLobbyPairingStatus('paired')
         window.setTimeout(() => {
           resetSessionRun(0, phoneSetup)
-        }, 250)
+        }, 200)
+      },
+      onPhoneReportOpened: () => {
+        setPhoneDeliveryState('opened')
       },
     })
-    return unsubscribe
-  }, [lobbyPairingCode, phase, resetSessionRun])
+    headsetLinkRef.current = link
+    return () => {
+      link.destroy()
+      if (headsetLinkRef.current === link) {
+        headsetLinkRef.current = null
+      }
+    }
+  }, [lobbyPairingCode, resetSessionRun])
 
   const [feedbackLoading, setFeedbackLoading] = useState(false)
 
   const handleEndSessionToDebrief = useCallback(async () => {
     groqTranscriberRef.current.stop()
     vrAudioEngine.stopSpeech()
+    interviewRequestSeqRef.current += 1
     uiHoveredCountRef.current = 0
     setActiveQuestion(null)
+    setInterviewThinking(false)
     setAnswerSeconds(0)
     setHandRaisedIndex(null)
     setIsSpeaking(false)
     setIsPaused(false)
+    setPhoneDeliveryState('idle')
 
     // Immediately show S2.6 debrief metrics (never block the screen)
     const initialRecord = snapshotCurrentRecord()
     setCompletedRecord(initialRecord)
     setFeedbackLoading(true)
     setPhase('debrief')
+    headsetLinkRef.current?.updateStatus('generating_report', initialRecord.title)
 
     // Save initial snapshot right away
     void saveSessionSnapshot(userId, initialRecord)
 
-    // Asynchronously fetch real DeepSeek V4.1-Flash coaching feedback & sync enriched record to Supabase
+    // Asynchronously fetch real DeepSeek coaching feedback & sync enriched record to Supabase
     const coveredSnapshot = new Set(coveredIds)
     const setupSnapshot = activeSetup
     const topicsSnapshot = topics
@@ -1926,17 +2180,39 @@ export function VRStage({
       coveredSnapshot,
     )
       .then(async (feedback) => {
-        if (!feedback) return
+        if (!feedback) {
+          headsetLinkRef.current?.updateStatus('debrief', initialRecord.title)
+          return
+        }
         const enriched = applyAIFeedbackToRecord(initialRecord, feedback)
         setCompletedRecord((current) =>
           current && current.id === initialRecord.id ? enriched : current,
         )
         await saveSessionSnapshot(userId, enriched)
+        headsetLinkRef.current?.updateStatus('debrief', enriched.title)
       })
       .finally(() => {
         setFeedbackLoading(false)
       })
   }, [activeSetup, coveredIds, snapshotCurrentRecord, topics, userId])
+
+  const handleSendReportToPhone = useCallback(
+    async (record: SessionRecord) => {
+      setPhoneDeliveryState('sent')
+      await saveSessionSnapshot(userId, record)
+      if (headsetLinkRef.current) {
+        await headsetLinkRef.current.publishReportReady(record)
+      }
+      if (!headsetBootMode && !isXRPresenting) {
+        if (onEndSession) {
+          onEndSession(record)
+        } else if (onBackToPreFlight) {
+          onBackToPreFlight()
+        }
+      }
+    },
+    [headsetBootMode, isXRPresenting, onBackToPreFlight, onEndSession, userId],
+  )
 
   const handleExitToLobby = useCallback(() => {
     groqTranscriberRef.current.stop()
@@ -1944,10 +2220,12 @@ export function VRStage({
     vrAudioEngine.stopRoomAmbience()
     vrMicManager.resetVADSession()
     analyzerRef.current.reset()
+    interviewRequestSeqRef.current += 1
     uiHoveredCountRef.current = 0
     setFeedbackLoading(false)
     setCompletedRecord(null)
     setActiveQuestion(null)
+    setInterviewThinking(false)
     setAnswerSeconds(0)
     setHandRaisedIndex(null)
     setIsPaused(false)
@@ -1956,7 +2234,9 @@ export function VRStage({
     setLiveWpm(0)
     setLiveWordCount(0)
     setLiveFillers(0)
+    setPhoneDeliveryState('idle')
     setPhase('vr_lobby')
+    headsetLinkRef.current?.updateStatus('waiting')
   }, [])
 
   const handleUseHint = useCallback(() => {
@@ -2031,11 +2311,7 @@ export function VRStage({
         onRepeatMoment={(slideIdx) => resetSessionRun(slideIdx)}
         onRaiseDifficulty={() => resetSessionRun(0, raiseDifficultySetup(activeSetup))}
         onOpenFullReport={(record) => {
-          if (onEndSession) {
-            onEndSession(record)
-          } else if (onBackToPreFlight) {
-            onBackToPreFlight()
-          }
+          void handleSendReportToPhone(record)
         }}
       />
     )
@@ -2048,7 +2324,7 @@ export function VRStage({
 
   const podiumHudPosition: [number, number, number] = isTableVenue
     ? [0, 0.97, -0.82]
-    : [0, 1.08, -0.64]
+    : [0, 1.10, -0.64]
   const podiumHudRotation: [number, number, number] = [-0.96, 0, 0]
 
   // Player Y offset: 0m standing on stage floor, +0.35m in Seated mode (or +0.25m auto-lift if tracked low)
@@ -2152,6 +2428,8 @@ export function VRStage({
           lastAutoSavedAt={lastAutoSavedAt}
           activeQuestion={activeQuestion}
           answerSeconds={answerSeconds}
+          isInterviewDriven={isInterviewDriven}
+          interviewThinking={interviewThinking}
           micStatus={micSnap.status}
           xrNotice={xrNotice}
           gazeZone={gazeZone}
@@ -2168,6 +2446,7 @@ export function VRStage({
           onTriggerQuestion={triggerQuestion}
           onFinishAnswer={handleFinishAnswer}
           onReturnToSlide={handleReturnToSlide}
+          onSubmitTypedAnswer={handleSubmitTypedAnswer}
         />
       )}
 
@@ -2190,10 +2469,10 @@ export function VRStage({
         />
       )}
 
-      {/* Opaque Pure-VR WebGL Canvas: alpha: false kills passthrough bleed-through */}
+      {/* Opaque Pure-VR WebGL Canvas: alpha: false kills passthrough bleed-through; near: 0.1 / far: 65 maximizes depth precision */}
       <Canvas
         gl={{ alpha: false, antialias: true, powerPreference: 'high-performance' }}
-        camera={{ position: [0, 1.65, 0], fov: 62, near: 0.05, far: 80 }}
+        camera={{ position: [0, 1.65, 0], fov: 62, near: 0.1, far: 65 }}
         dpr={[1, 1.5]}
         onCreated={({ gl }) => {
           gl.xr.setReferenceSpaceType('local-floor')
@@ -2269,7 +2548,15 @@ export function VRStage({
                 onCalibrateGaze={handleCalibrateGaze}
                 onTestTrigger={() => setLobbyTriggerTested(true)}
                 onSelectVenueAndStart={(venue) => {
-                  const nextSetup: SessionSetup = { ...activeSetup, venue }
+                  const nextPracticeType =
+                    venue === 'interview_room' || venue === 'panel_room'
+                      ? 'interview'
+                      : 'presentation'
+                  const nextSetup: SessionSetup = {
+                    ...activeSetup,
+                    venue,
+                    practiceType: nextPracticeType,
+                  }
                   resetSessionRun(0, nextSetup)
                 }}
                 onStartPractice={() => {
@@ -2347,9 +2634,9 @@ export function VRStage({
                 </mesh>
               </group>
 
-              {/* Confidence Floor Monitor at Stage Apron */}
+              {/* Confidence Floor Monitor cleanly above raised stage deck (y = 0.02) */}
               {!isTableVenue && (
-                <group position={[0, 0.30, -1.78]} rotation={[-0.48, 0, 0]}>
+                <group position={[0, 0.32, -1.78]} rotation={[-0.48, 0, 0]}>
                   <mesh position={[0, 0, 0]}>
                     <boxGeometry args={[1.20, 0.64, 0.04]} />
                     <meshStandardMaterial color="#1e293b" roughness={0.45} metalness={0.45} />
@@ -2409,6 +2696,8 @@ export function VRStage({
                   panelVisible={panelVisible}
                   isPaused={isPaused}
                   hasActiveQuestion={activeQuestion !== null}
+                  isInterviewDriven={isInterviewDriven}
+                  interviewThinking={interviewThinking}
                   onPrevSlide={handlePrevSlide}
                   onNextSlide={handleNextSlide}
                   onToggleQA={() => {
@@ -2438,6 +2727,8 @@ export function VRStage({
                   answerSeconds={answerSeconds}
                   questionsRemaining={questionsRemaining}
                   followUpsEnabled={activeSetup.followUps}
+                  isInterviewDriven={isInterviewDriven}
+                  interviewThinking={interviewThinking}
                   onJumpToSlide={goToSlide}
                   onFinishAnswer={handleFinishAnswer}
                   onReturnToSlide={handleReturnToSlide}
@@ -2462,7 +2753,16 @@ export function VRStage({
                   seatedHeightMode={seatedHeightMode}
                   isXRPresenting={isXRPresenting}
                   onSelectVenue={(venue) =>
-                    setActiveSetup((prev) => ({ ...prev, venue }))
+                    setActiveSetup((prev) => ({
+                      ...prev,
+                      venue,
+                      practiceType:
+                        venue === 'interview_room' || venue === 'panel_room'
+                          ? 'interview'
+                          : prev.practiceType === 'interview'
+                            ? 'presentation'
+                            : prev.practiceType,
+                    }))
                   }
                   onRetryMic={() => void vrMicManager.requestMicFromGesture()}
                   onToggleMusic={() => vrAudioEngine.setMusicEnabled(!musicEnabled)}
@@ -2489,17 +2789,14 @@ export function VRStage({
                   record={completedRecord}
                   language={language}
                   feedbackLoading={feedbackLoading}
+                  pairingCode={pairingCode ?? lobbyPairingCode}
+                  phoneDeliveryState={phoneDeliveryState}
                   onTryAgain={() => resetSessionRun(0)}
                   onRaiseDifficulty={() =>
                     resetSessionRun(0, raiseDifficultySetup(activeSetup))
                   }
                   onExitToReport={() => {
-                    handleExitVR()
-                    if (onEndSession) {
-                      onEndSession(completedRecord)
-                    } else if (onBackToPreFlight) {
-                      onBackToPreFlight()
-                    }
+                    void handleSendReportToPhone(completedRecord)
                   }}
                   onExitToLobby={handleExitToLobby}
                   onHoverChange={handleUIHoverChange}

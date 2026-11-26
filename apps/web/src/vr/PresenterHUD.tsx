@@ -24,6 +24,8 @@ interface PresenterHUDProps {
   lastAutoSavedAt: string | null
   activeQuestion: QAQuestion | null
   answerSeconds: number
+  isInterviewDriven?: boolean
+  interviewThinking?: boolean
   micStatus: VRMicStatus
   xrNotice: string | null
   gazeZone: 'left' | 'centre' | 'right'
@@ -40,6 +42,7 @@ interface PresenterHUDProps {
   onTriggerQuestion: () => void
   onFinishAnswer: () => void
   onReturnToSlide: () => void
+  onSubmitTypedAnswer?: (answer: string) => void
 }
 
 interface SpeechRecognitionEventLike {
@@ -90,6 +93,8 @@ export function PresenterHUD({
   lastAutoSavedAt,
   activeQuestion,
   answerSeconds,
+  isInterviewDriven = false,
+  interviewThinking = false,
   micStatus,
   xrNotice,
   gazeZone,
@@ -106,12 +111,14 @@ export function PresenterHUD({
   onTriggerQuestion,
   onFinishAnswer,
   onReturnToSlide,
+  onSubmitTypedAnswer,
 }: PresenterHUDProps) {
   const t = translations[language].vr.hud
   const qaT = translations[language].vr.qa
   const homeT = translations[language].home
 
   const [voiceActive, setVoiceActive] = useState(false)
+  const [typedReply, setTypedReply] = useState('')
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const lastCommandAtRef = useRef(0)
 
@@ -432,47 +439,110 @@ export function PresenterHUD({
         </div>
       )}
 
-      {/* S2.3 Live Q&A Answering HUD (Desktop view) */}
-      {activeQuestion && !isPaused && (
+      {/* S2.3 Live Q&A / Dynamic Interview HUD (Desktop view) */}
+      {(activeQuestion || (isInterviewDriven && interviewThinking)) && !isPaused && (
         <div id="hud-qa-card" className="vr-qa-card" role="dialog" aria-label={qaT.answeringKicker}>
           <div className="vr-qa-top">
             <span className="vr-qa-speaker">
-              {qaT.answeringKicker} · {activeQuestion.speakerLabel}
+              {interviewThinking
+                ? language === 'fr'
+                  ? '● Recruteur IA en réflexion…'
+                  : '● AI Interviewer thinking…'
+                : `${qaT.answeringKicker} · ${activeQuestion?.speakerLabel ?? ''}`}
             </span>
-            <div className="vr-qa-timer-pill">
-              <span>{qaT.answerTimerLabel}:</span>
-              <strong
-                className={
-                  answerSeconds > 45 ? 'danger' : answerSeconds >= 35 ? 'warn' : ''
-                }
-              >
-                {formatClock(answerSeconds)}
-              </strong>
-              <span className="vr-qa-aim">({qaT.aimUnder45})</span>
-            </div>
+            {activeQuestion && (
+              <div className="vr-qa-timer-pill">
+                <span>{qaT.answerTimerLabel}:</span>
+                <strong
+                  className={
+                    answerSeconds > 45 ? 'danger' : answerSeconds >= 35 ? 'warn' : ''
+                  }
+                >
+                  {formatClock(answerSeconds)}
+                </strong>
+                <span className="vr-qa-aim">({qaT.aimUnder45})</span>
+              </div>
+            )}
           </div>
 
-          <p className="vr-qa-question-text">“{activeQuestion.text}”</p>
+          {activeQuestion && <p className="vr-qa-question-text">“{activeQuestion.text}”</p>}
+
+          {isInterviewDriven && onSubmitTypedAnswer && (
+            <form
+              className="vr-qa-reply-form"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const trimmed = typedReply.trim()
+                if (!trimmed || interviewThinking) return
+                onSubmitTypedAnswer(trimmed)
+                setTypedReply('')
+              }}
+            >
+              <input
+                id="qa-typed-reply-input"
+                type="text"
+                className="vr-qa-reply-input"
+                value={typedReply}
+                disabled={interviewThinking}
+                placeholder={
+                  language === 'fr'
+                    ? 'Parlez au micro ou tapez une réponse pour tester le recruteur IA…'
+                    : 'Speak into mic or type an answer to test the AI interviewer…'
+                }
+                onChange={(e) => setTypedReply(e.target.value)}
+              />
+              <button
+                id="qa-typed-reply-submit"
+                type="submit"
+                className="btn-small"
+                disabled={interviewThinking || !typedReply.trim()}
+              >
+                {language === 'fr' ? 'Répondre →' : 'Reply →'}
+              </button>
+            </form>
+          )}
 
           <div className="vr-qa-actions">
-            {setup.followUps && !activeQuestion.isFollowUp && (
+            {isInterviewDriven ? (
               <button
                 id="qa-followup-btn"
                 type="button"
                 className="btn-small"
+                disabled={interviewThinking}
                 onClick={onFinishAnswer}
               >
-                {qaT.doneAnsweringBtn} → {qaT.askFollowUpBtn}
+                {interviewThinking
+                  ? language === 'fr'
+                    ? 'Génération de la question…'
+                    : 'Generating next question…'
+                  : language === 'fr'
+                    ? 'Réponse terminée → Question suivante'
+                    : 'Done Answering → Next Question'}
               </button>
+            ) : (
+              <>
+                {setup.followUps && activeQuestion && !activeQuestion.isFollowUp && (
+                  <button
+                    id="qa-followup-btn"
+                    type="button"
+                    className="btn-small"
+                    onClick={onFinishAnswer}
+                  >
+                    {qaT.doneAnsweringBtn} → {qaT.askFollowUpBtn}
+                  </button>
+                )}
+                {activeQuestion && (
+                  <button
+                    id="qa-return-slide-btn"
+                    type="button"
+                    className="vr-hud-btn"
+                    onClick={onReturnToSlide}
+                  >
+                    {qaT.returnToSlideBtn.replace('{num}', String(activeQuestion.slideIndex + 1))}
+                  </button>
+                )}
+              </>
             )}
-            <button
-              id="qa-return-slide-btn"
-              type="button"
-              className="vr-hud-btn"
-              onClick={onReturnToSlide}
-            >
-              {qaT.returnToSlideBtn.replace('{num}', String(activeQuestion.slideIndex + 1))}
-            </button>
           </div>
         </div>
       )}

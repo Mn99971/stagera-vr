@@ -3,6 +3,7 @@ import type {
   AppLanguage,
   FlaggedMoment,
   GazeZones,
+  InterviewTurn,
   SessionRecord,
   SessionSetup,
 } from '../types/stagera'
@@ -26,6 +27,7 @@ export interface BuildSessionRecordInput {
   weCount: number
   hintUsed: boolean
   transcript: string
+  qaTranscript?: InterviewTurn[]
   flaggedMoments: FlaggedMoment[]
   /** Optional Quest Audio VAD fallback counts when Web Speech API is unsupported */
   vadWordCount?: number
@@ -136,6 +138,7 @@ export function buildSessionRecord(input: BuildSessionRecordInput): SessionRecor
     iCount: input.iCount,
     weCount: input.weCount,
     transcript: effectiveTranscript,
+    qaTranscript: input.qaTranscript?.length ? input.qaTranscript : undefined,
     recommendations: generateRecommendations(input),
     flaggedMoments: input.flaggedMoments,
     goals: input.setup.goals,
@@ -176,7 +179,7 @@ export async function saveSessionSnapshot(
 
   const setupId = record.setupId && UUID_REGEX.test(record.setupId) ? record.setupId : null
 
-  const { error } = await supabase.from('sessions').upsert({
+  const basePayload = {
     id: record.id,
     user_id: userId,
     setup_id: setupId,
@@ -193,7 +196,19 @@ export async function saveSessionSnapshot(
     topics_total: record.topicsTotal,
     transcript: record.transcript,
     recommendations: record.recommendations,
+  }
+
+  let { error } = await supabase.from('sessions').upsert({
+    ...basePayload,
+    venue: record.venue,
+    qa_transcript: record.qaTranscript ?? [],
+    ai_feedback: record.aiFeedback ?? null,
   })
+
+  if (error) {
+    const retry = await supabase.from('sessions').upsert(basePayload)
+    error = retry.error
+  }
 
   if (!error && record.flaggedMoments.length > 0) {
     await supabase.from('flagged_moments').upsert(

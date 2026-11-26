@@ -279,36 +279,47 @@ export async function fetchAllSessions(userId?: string): Promise<SessionRecord[]
         flagsBySession.set(sid, list)
       }
 
-      const mapped: SessionRecord[] = sessionRows.map((row) => ({
-        id: String(row.id),
-        setupId: row.setup_id ?? undefined,
-        title: String(row.title ?? 'VR Session'),
-        practiceType: (row.practice_type ?? 'presentation') as PracticeType,
-        venue: 'lecture_hall' as VenueType,
-        coachedMode: Boolean(row.coached_mode),
-        hintUsed: Boolean(row.hint_used),
-        durationSeconds: Number(row.duration_seconds ?? 0),
-        timeLimitMinutes: 15,
-        wpm: Number(row.wpm ?? 135),
-        fillerCount: Number(row.filler_count ?? 0),
-        fillerBreakdown: (row.filler_breakdown as Record<string, number>) ?? {},
-        eyeContactZones: (row.eye_contact_zones as {
-          left: number
-          centre: number
-          right: number
-        }) ?? { left: 25, centre: 50, right: 25 },
-        topicsCovered: Number(row.topics_covered ?? 0),
-        topicsTotal: Math.max(1, Number(row.topics_total ?? 1)),
-        iCount: 0,
-        weCount: 0,
-        transcript: String(row.transcript ?? ''),
-        recommendations: Array.isArray(row.recommendations)
-          ? (row.recommendations as string[])
-          : [],
-        flaggedMoments: flagsBySession.get(String(row.id)) ?? [],
-        goals: [],
-        createdAt: String(row.created_at ?? new Date().toISOString()),
-      }))
+      const localById = new Map(local.map((item) => [item.id, item]))
+      const mapped: SessionRecord[] = sessionRows.map((row) => {
+        const localMatch = localById.get(String(row.id))
+        return {
+          id: String(row.id),
+          setupId: row.setup_id ?? undefined,
+          title: String(row.title ?? 'VR Session'),
+          practiceType: (row.practice_type ?? 'presentation') as PracticeType,
+          venue: (row.venue ?? localMatch?.venue ?? 'lecture_hall') as VenueType,
+          coachedMode: Boolean(row.coached_mode),
+          hintUsed: Boolean(row.hint_used),
+          durationSeconds: Number(row.duration_seconds ?? 0),
+          timeLimitMinutes: localMatch?.timeLimitMinutes ?? 15,
+          wpm: Number(row.wpm ?? 135),
+          fillerCount: Number(row.filler_count ?? 0),
+          fillerBreakdown: (row.filler_breakdown as Record<string, number>) ?? {},
+          eyeContactZones: (row.eye_contact_zones as {
+            left: number
+            centre: number
+            right: number
+          }) ?? { left: 25, centre: 50, right: 25 },
+          topicsCovered: Number(row.topics_covered ?? 0),
+          topicsTotal: Math.max(1, Number(row.topics_total ?? 1)),
+          iCount: localMatch?.iCount ?? 0,
+          weCount: localMatch?.weCount ?? 0,
+          transcript: String(row.transcript ?? ''),
+          qaTranscript: Array.isArray(row.qa_transcript)
+            ? row.qa_transcript
+            : localMatch?.qaTranscript,
+          recommendations: Array.isArray(row.recommendations)
+            ? (row.recommendations as string[])
+            : [],
+          flaggedMoments: flagsBySession.get(String(row.id)) ?? [],
+          goals: localMatch?.goals ?? [],
+          aiFeedback:
+            row.ai_feedback && typeof row.ai_feedback === 'object'
+              ? row.ai_feedback
+              : localMatch?.aiFeedback,
+          createdAt: String(row.created_at ?? new Date().toISOString()),
+        }
+      })
 
       // Merge any newer local sessions not yet in DB
       const merged = [

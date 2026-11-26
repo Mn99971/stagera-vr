@@ -17,6 +17,7 @@ import type {
   SessionSetup,
   UserProfile,
 } from '../types/stagera'
+import type { ActivePhoneLinkView } from '../App'
 import { AuthScreen } from './AuthScreen'
 import { ConnectHeadsetScreen } from './ConnectHeadsetScreen'
 import { HomeDashboard } from './HomeDashboard'
@@ -27,6 +28,10 @@ import { WelcomeScreen } from './WelcomeScreen'
 interface CompanionFlowProps {
   language: AppLanguage
   sessions: SessionRecord[]
+  phoneLinkState: ActivePhoneLinkView | null
+  onConnectHeadset: (code: string, setup: SessionSetup) => void
+  onResyncHeadset: () => void
+  onDisconnectHeadset: () => void
   onLanguageChange: (lang: AppLanguage) => void
   onLaunchVR: (setup: SessionSetup) => void
   onOpenReport: (record?: SessionRecord) => void
@@ -56,6 +61,10 @@ function createDraftProfile(auth: AuthResult, language: AppLanguage): UserProfil
 export function CompanionFlow({
   language,
   sessions,
+  phoneLinkState,
+  onConnectHeadset,
+  onResyncHeadset,
+  onDisconnectHeadset,
   onLanguageChange,
   onLaunchVR,
   onOpenReport,
@@ -245,6 +254,10 @@ export function CompanionFlow({
           language={language}
           userId={profile.id}
           setup={pairingSetup}
+          phoneLinkState={phoneLinkState}
+          onConnectHeadset={onConnectHeadset}
+          onResyncHeadset={onResyncHeadset}
+          onDisconnectHeadset={onDisconnectHeadset}
           onLanguageChange={handleLanguageChange}
           onBack={() => setScreen('home')}
           onLaunchLocalVR={(setup) => onLaunchVR(setup)}
