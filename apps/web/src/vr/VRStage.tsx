@@ -883,11 +883,31 @@ function XRAudioAndTriggerBridge({
   const checkedAutoHeightRef = useRef(false)
   const lastTriggerAtRef = useRef(0)
 
+  // Keep latest props in a ref so XR session listeners are never torn down on re-renders
+  const latestRef = useRef({
+    phase,
+    isPaused,
+    uiHoveredCountRef,
+    onPrevSlide,
+    onNextSlide,
+    onLobbyTriggerTest,
+    onAutoHeightOffsetChange,
+  })
+  latestRef.current = {
+    phase,
+    isPaused,
+    uiHoveredCountRef,
+    onPrevSlide,
+    onNextSlide,
+    onLobbyTriggerTest,
+    onAutoHeightOffsetChange,
+  }
+
   useFrame(() => {
     if (!gl.xr.isPresenting || seatedHeightMode || checkedAutoHeightRef.current) return
     if (camera.position.y > 0.15 && camera.position.y < 1.28) {
       checkedAutoHeightRef.current = true
-      onAutoHeightOffsetChange(0.25)
+      latestRef.current.onAutoHeightOffsetChange(0.25)
     } else if (camera.position.y >= 1.28) {
       checkedAutoHeightRef.current = true
     }
@@ -898,24 +918,51 @@ function XRAudioAndTriggerBridge({
     let attachedSession: XRSession | null = null
 
     const onSelectStart = (event: XRInputSourceEvent) => {
+      const {
+        phase: curPhase,
+        isPaused: curPaused,
+        uiHoveredCountRef: hoverRef,
+        onPrevSlide: prevSlide,
+        onNextSlide: nextSlide,
+        onLobbyTriggerTest: lobbyTest,
+      } = latestRef.current
+
       // Never intercept trigger when ray is hovering any 3D UI button
-      if (uiHoveredCountRef.current > 0) return
+      if (hoverRef.current > 0) return
 
       // 350ms debounce so a single trigger pull never double-fires
       const now = performance.now()
       if (now - lastTriggerAtRef.current < 350) return
       lastTriggerAtRef.current = now
 
-      if (phase === 'vr_lobby') {
-        onLobbyTriggerTest()
+      if (curPhase === 'vr_lobby') {
+        lobbyTest()
         return
       }
-      if (phase !== 'active' || isPaused) return
+      if (curPhase !== 'active' || curPaused) return
 
       if (event.inputSource.handedness === 'left') {
-        onPrevSlide()
+        prevSlide()
       } else {
-        onNextSlide()
+        nextSlide()
+      }
+    }
+
+    const attachSession = () => {
+      const session = xr.getSession()
+      if (session && session !== attachedSession) {
+        if (attachedSession) {
+          attachedSession.removeEventListener('selectstart', onSelectStart)
+        }
+        attachedSession = session
+        session.addEventListener('selectstart', onSelectStart)
+      }
+    }
+
+    const detachSession = () => {
+      if (attachedSession) {
+        attachedSession.removeEventListener('selectstart', onSelectStart)
+        attachedSession = null
       }
     }
 
@@ -923,41 +970,27 @@ function XRAudioAndTriggerBridge({
       checkedAutoHeightRef.current = false
       void vrMicManager.resumeAudioContext()
       void vrAudioEngine.resume()
-      const session = xr.getSession()
-      if (session) {
-        attachedSession = session
-        session.addEventListener('selectstart', onSelectStart)
-      }
+      attachSession()
     }
 
     const onSessionEnd = () => {
       checkedAutoHeightRef.current = false
-      onAutoHeightOffsetChange(0)
-      if (attachedSession) {
-        attachedSession.removeEventListener('selectstart', onSelectStart)
-        attachedSession = null
-      }
+      latestRef.current.onAutoHeightOffsetChange(0)
+      detachSession()
     }
 
     xr.addEventListener('sessionstart', onSessionStart)
     xr.addEventListener('sessionend', onSessionEnd)
-    onSessionStart()
+    if (xr.getSession()) {
+      attachSession()
+    }
 
     return () => {
       xr.removeEventListener('sessionstart', onSessionStart)
       xr.removeEventListener('sessionend', onSessionEnd)
-      onSessionEnd()
+      detachSession()
     }
-  }, [
-    gl,
-    isPaused,
-    onAutoHeightOffsetChange,
-    onLobbyTriggerTest,
-    onNextSlide,
-    onPrevSlide,
-    phase,
-    uiHoveredCountRef,
-  ])
+  }, [gl])
 
   return null
 }
@@ -1386,6 +1419,18 @@ export function VRStage({
       return { ...prev, [zone]: true }
     })
   }, [])
+
+  const handleLobbyTriggerTest = useCallback(() => {
+    vrAudioEngine.playClick()
+    setLobbyTriggerTested(true)
+  }, [])
+
+  // Player Y offset: 0m standing on stage floor, +0.35m in Seated mode (or +0.25m auto-lift if tracked low)
+  const playerOriginY = seatedHeightMode ? 0.35 : autoHeightOffset
+  const playerOriginPosition = useMemo<[number, number, number]>(
+    () => [0, playerOriginY, 0],
+    [playerOriginY],
+  )
 
   const handleEnterVR = useCallback(() => {
     setXrNotice(null)
@@ -2327,9 +2372,6 @@ export function VRStage({
     : [0, 1.10, -0.64]
   const podiumHudRotation: [number, number, number] = [-0.96, 0, 0]
 
-  // Player Y offset: 0m standing on stage floor, +0.35m in Seated mode (or +0.25m auto-lift if tracked low)
-  const playerOriginY = seatedHeightMode ? 0.35 : autoHeightOffset
-
   const askingSeat =
     handRaisedIndex !== null && seats[handRaisedIndex] ? seats[handRaisedIndex] : null
   const showOneMinWarning =
@@ -2480,7 +2522,7 @@ export function VRStage({
       >
         <XR store={xrStore}>
           {/* Standing on stage floor (y = 0) with optional Seated (+0.35m) / low-tracking comfort lift */}
-          <XROrigin position={[0, playerOriginY, 0]} />
+          <XROrigin position={playerOriginPosition} />
 
           <XRAudioAndTriggerBridge
             phase={phase}
@@ -2489,10 +2531,7 @@ export function VRStage({
             uiHoveredCountRef={uiHoveredCountRef}
             onPrevSlide={handlePrevSlide}
             onNextSlide={handleNextSlide}
-            onLobbyTriggerTest={() => {
-              vrAudioEngine.playClick()
-              setLobbyTriggerTested(true)
-            }}
+            onLobbyTriggerTest={handleLobbyTriggerTest}
             onAutoHeightOffsetChange={setAutoHeightOffset}
           />
           <LobbyMicCheckWatcher
